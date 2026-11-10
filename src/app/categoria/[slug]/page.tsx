@@ -5,6 +5,7 @@ import { categories, getCategory } from "@/data/categories";
 import { Container } from "@/components/layout/Container";
 import { PageIntro } from "@/components/layout/PageIntro";
 import { Catalog } from "@/components/commerce/Catalog";
+import { ProductGridSkeleton } from "@/components/ui/Skeleton";
 export function generateStaticParams() {
   return categories.map((c) => ({ slug: c.slug }));
 }
@@ -36,7 +37,7 @@ export default async function CategoryPage({
           { label: category.name },
         ]}
       />
-      <Suspense fallback={<p role="status">Carregando categoria…</p>}>
+      <Suspense fallback={<ProductGridSkeleton label="Carregando categoria…" />}>
         <Catalog categorySlug={category.slug} />
       </Suspense>
     </Container>

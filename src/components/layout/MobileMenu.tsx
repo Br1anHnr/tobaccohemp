@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, UserRound } from "lucide-react";
 import { navigation } from "@/data/navigation";
 import { categories } from "@/data/categories";
 import { useCart } from "@/store/cart-store";
@@ -25,6 +25,9 @@ export function MobileMenu() {
           </Link>
         ))}
       </nav>
+      <Link href="/conta" className="menu-account" onClick={() => close(null)}>
+        <UserRound size={18} aria-hidden="true" /> Minha conta
+      </Link>
       <p className="eyebrow">Por categoria</p>
       <div className="menu-categories">
         {categories.map((c) => (

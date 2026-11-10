@@ -102,6 +102,15 @@ export function SearchOverlay() {
           </p>
         )}
       </div>
+      {query.trim() && results.length > 0 && (
+        <Link
+          className="text-link search-all"
+          href={`/loja?q=${encodeURIComponent(query.trim())}`}
+          onClick={() => open(null)}
+        >
+          Ver todos os resultados na loja <ArrowUpRight size={15} />
+        </Link>
+      )}
     </Modal>
   );
 }
