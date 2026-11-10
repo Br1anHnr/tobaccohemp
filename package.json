@@ -8,6 +8,7 @@
     "start": "next start --hostname 127.0.0.1",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
+    "security:audit": "node scripts/security-audit.mjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {
