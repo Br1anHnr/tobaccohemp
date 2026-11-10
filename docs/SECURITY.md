@@ -98,16 +98,26 @@ Resultados observados em novembro de 2026, registrados para rastreabilidade. Sã
 advertências, não correções — ajustes de dependência podem afetar os contratos da
 Golden Image e devem ser decididos no fluxo de integração.
 
-- **`next@16.3.8` — vulnerabilidade crítica (produção).** O `npm audit --omit=dev`
-  aponta o pacote `next` com avisos afetando `>=16.0.0 <=16.4.0`, com correção em
-  `16.4.6`:
-  - RCE não autenticado na API de otimização de imagens ao usar SVG (crítica);
-  - RCE não autenticado em `use cache` retornando typed arrays (crítica);
-  - DoS no App Router via Server Actions (alta).
-  A demo atual não usa `next/image` com SVG, `use cache` nem Server Actions, o que
-  reduz a superfície exposta, mas a atualização é recomendada antes de qualquer
-  publicação real. A afirmação de "zero vulnerabilidades" do `README.md` é de
-  outubro/2026 e está desatualizada em relação a estes avisos.
+- **`next` — vulnerabilidade crítica (produção). CORRIGIDA.** O `npm audit --omit=dev`
+  apontava `next@16.3.8` com avisos afetando `>=16.0.0 <=16.4.0` (RCE na API de
+  otimização de imagens ao usar SVG, RCE em `use cache` retornando typed arrays e
+  DoS no App Router via Server Actions). O projeto foi atualizado para
+  **`next@16.4.6`** (e `eslint-config-next@16.4.6`); `npm audit --omit=dev` agora
+  reporta **zero vulnerabilidades**. A afirmação de "zero vulnerabilidades" do
+  `README.md` (outubro/2026) voltou a ser verdadeira para produção.
+- **Compatibilidade: hydration mismatch de `next/image` no 16.4.6.** O upgrade
+  expôs um aviso de hydration nos cards de produto: o servidor renderiza
+  `loading="eager"` e o cliente `loading="lazy"` nas imagens via `next/image`
+  (ex.: `ProductCard`). O teste "routes, images and responsive layout" passa de
+  forma estável no 16.3.8 e passa a falhar intermitentemente no 16.4.6 por causa
+  desse aviso no console. Impacto: aviso de console e possível carregamento eager
+  de imagens abaixo da dobra; não quebra funcionalidade nem segurança. Correção
+  recomendada (no fluxo de integração): declarar `loading`/`priority` explícito
+  nas imagens de `ProductCard` ou usar `suppressHydrationWarning`.
+- **Teste de carrinho pré-existente.** O teste "cart quantities, variants, stock
+  ceiling, persistence and removal" falha (esperava quantidade 2 após recarga,
+  recebeu 1) de forma **idêntica no 16.3.8 e no 16.4.6** — portanto, é um defeito
+  pré-existente no fluxo de persistência do carrinho, não causado pelo upgrade.
 - **Dependências com `latest` no `package.json`.** `lucide-react` e `zustand`
   (produção) e diversas de desenvolvimento usam `latest`. Para publicação, fixe
   versões e revogue o `latest` em produção.

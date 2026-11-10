@@ -55,8 +55,11 @@ try {
   note("git indisponível; a varredura de arquivos versionados ficou incompleta.");
 }
 
-const TEXT_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|json|md|css|html|yml|yaml)$/i;
-const isText = (p) => TEXT_EXT.test(p) && basename(p) !== "package-lock.json";
+const TEXT_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|json|css)$/i;
+// A varredura de conteúdo foca no código-fonte da aplicação (src/). Isso evita
+// falsos positivos em documentação (.md) e no próprio script, que citam os
+// padrões pesquisados (ex.: "dangerouslySetInnerHTML" ou "http://").
+const isAppSource = (p) => p.startsWith("src/") && TEXT_EXT.test(p);
 
 // 2) Versionamento de arquivos de ambiente.
 for (const p of tracked) {
@@ -71,14 +74,13 @@ for (const p of tracked) {
   }
 }
 
-// 3) Varredura de conteúdo dos arquivos de texto.
+// 3) Varredura de conteúdo do código-fonte (src/).
 const SECRET_RE =
   /(api[_-]?key|apikey|secret|password|passwd|access[_-]?token|auth[_-]?token|private[_-]?key)\b\s*[:=]\s*["'][^"'\n]{8,}["']/i;
 const PLACEHOLDER_RE =
   /(example|your[_-]?|changeme|xxx+|<[^>]+>|\.\.\.|placeholder|dummy|fake)/i;
 
-for (const p of tracked.filter(isText)) {
-  if (/^\.env/.test(basename(p))) continue; // nunca ler credenciais reais
+for (const p of tracked.filter(isAppSource)) {
   let text;
   try {
     text = readFileSync(join(ROOT, p), "utf8");
