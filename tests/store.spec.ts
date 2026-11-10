@@ -230,6 +230,7 @@ test("cart quantities, variants, stock ceiling, persistence and removal", async 
     dialog.getByLabel("Quantidade de Case Compact Preto", { exact: true }),
   ).toHaveText("2");
   await dialog.getByRole("link", { name: "Ver carrinho" }).click();
+  await expect(page).toHaveURL(/\/carrinho$/);
   await page.reload();
   await expect(
     page.getByLabel("Quantidade de Case Compact Preto", { exact: true }),

@@ -1,5 +1,9 @@
 # Tobacco Hemp — MVP
 
+O dashboard existente em `/admin` está conectado ao backend de desenvolvimento
+da Golden Image. [Executar e testar a conexão local](docs/admin-backend-connection.md).
+A loja e seus fluxos demonstrativos continuam independentes dessa conexão.
+
 E-commerce demonstrativo de acessórios de uso geral. Identidade oficial preservada, interface escura, fotografia quente e navegação em português. Não inclui produtos de tabaco, nicotina ou cannabis.
 
 ## Executar
