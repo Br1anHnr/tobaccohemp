@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Container } from "@/components/layout/Container";
 import { PageIntro } from "@/components/layout/PageIntro";
 import { Catalog } from "@/components/commerce/Catalog";
+import { ProductGridSkeleton } from "@/components/ui/Skeleton";
 export const metadata: Metadata = {
   title: "Loja",
   description:
@@ -17,7 +18,7 @@ export default function ShopPage() {
         eyebrow="Explore a seleção"
         breadcrumbs={[{ label: "Loja" }]}
       />
-      <Suspense fallback={<p role="status">Carregando catálogo…</p>}>
+      <Suspense fallback={<ProductGridSkeleton label="Carregando catálogo…" />}>
         <Catalog />
       </Suspense>
     </Container>

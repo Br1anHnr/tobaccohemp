@@ -1,10 +1,11 @@
 "use client";
 import { startTransition, useMemo, useOptimistic, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { SlidersHorizontal, X } from "lucide-react";
+import { Search, SlidersHorizontal, X } from "lucide-react";
 import { products } from "@/data/products";
 import { categories } from "@/data/categories";
 import { currency } from "@/lib/currency";
+import { normalize } from "@/lib/utils";
 import { ProductGrid } from "./ProductGrid";
 const brands = [...new Set(products.map((p) => p.brand))];
 export function Catalog({ categorySlug }: { categorySlug?: string }) {
@@ -19,6 +20,8 @@ export function Catalog({ categorySlug }: { categorySlug?: string }) {
   const brand = params.get("marca") ?? "";
   const onlyNew = params.get("novidades") === "1";
   const sort = params.get("ordem") ?? "destaques";
+  const query = params.get("q") ?? "";
+  const needle = normalize(query.trim());
   const requestedMax = Number(params.get("preco") ?? 200);
   const maxPrice = Number.isFinite(requestedMax)
     ? Math.max(0, Math.min(200, requestedMax))
@@ -43,7 +46,11 @@ export function Catalog({ categorySlug }: { categorySlug?: string }) {
             (!category || p.categorySlug === category) &&
             (!brand || p.brand === brand) &&
             (!onlyNew || p.isNew) &&
-            p.price <= maxPrice,
+            p.price <= maxPrice &&
+            (!needle ||
+              normalize(
+                [p.name, p.brand, p.category, p.description, ...p.tags].join(" "),
+              ).includes(needle)),
         )
         .sort((a, b) =>
           sort === "menor"
@@ -54,11 +61,38 @@ export function Catalog({ categorySlug }: { categorySlug?: string }) {
                 ? Number(b.isNew) - Number(a.isNew)
                 : Number(b.isFeatured) - Number(a.isFeatured),
         ),
-    [category, brand, onlyNew, maxPrice, sort],
+    [category, brand, onlyNew, maxPrice, sort, needle],
   );
   return (
     <div className="catalog">
       <div className="catalog-toolbar">
+        <form
+          role="search"
+          className="catalog-search"
+          onSubmit={(e) => e.preventDefault()}
+        >
+          <Search size={16} aria-hidden="true" />
+          <label htmlFor="catalog-q" className="sr-only">
+            Buscar no catálogo
+          </label>
+          <input
+            id="catalog-q"
+            type="search"
+            placeholder="Buscar no catálogo"
+            value={query}
+            maxLength={80}
+            onChange={(e) => change("q", e.target.value)}
+          />
+          {query && (
+            <button
+              type="button"
+              aria-label="Limpar busca"
+              onClick={() => change("q", "")}
+            >
+              <X size={15} />
+            </button>
+          )}
+        </form>
         <span role="status">
           {visible.length} {visible.length === 1 ? "produto" : "produtos"}
         </span>
@@ -158,8 +192,16 @@ export function Catalog({ categorySlug }: { categorySlug?: string }) {
             <ProductGrid products={visible} />
           ) : (
             <div className="empty-state compact">
-              <h2>Nenhum produto nesta seleção.</h2>
-              <p>Experimente outra categoria ou ajuste os filtros.</p>
+              <h2>
+                {query
+                  ? `Nenhum resultado para “${query}”.`
+                  : "Nenhum produto nesta seleção."}
+              </h2>
+              <p>
+                {query
+                  ? "Revise a grafia ou tente termos como “case” ou “bandeja”."
+                  : "Experimente outra categoria ou ajuste os filtros."}
+              </p>
               <button
                 className="button button-secondary"
                 onClick={() =>
