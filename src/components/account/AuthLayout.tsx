@@ -29,11 +29,10 @@ export function AuthLayout({
         <div className="auth-card">{children}</div>
         <aside className="auth-aside">
           <ShieldCheck size={22} aria-hidden="true" />
-          <h2>Ambiente em preparação</h2>
+          <h2>Seus dados protegidos</h2>
           <p>
-            As telas de conta já estão prontas para a integração com o serviço
-            de autenticação. Até lá, nenhum cadastro é criado e nenhuma senha é
-            enviada ou guardada no navegador.
+            Sua senha é armazenada com hash seguro e sua sessão fica em um
+            cookie protegido. Nenhuma senha é guardada no navegador.
           </p>
           <p>
             Você continua podendo montar seu carrinho e salvar favoritos neste

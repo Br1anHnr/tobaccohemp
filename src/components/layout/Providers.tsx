@@ -13,15 +13,19 @@ function AccountPreview() {
   const overlay = useCart((s) => s.overlay);
   const open = useCart((s) => s.setOverlay);
   const demo = useAccount((s) => s.demo);
+  const customer = useAccount((s) => s.customer);
+  const authed = Boolean(customer) || demo;
   return (
     <Modal
       open={overlay === "account"}
       onClose={() => open(null)}
       title="Sua seleção, do seu jeito."
       description={
-        demo
-          ? "Você está navegando na área do cliente demonstrativa."
-          : "A autenticação de clientes ainda não está ativa. Conheça as telas de conta ou continue comprando como visitante."
+        authed
+          ? customer
+            ? "Você está conectado à sua conta."
+            : "Você está navegando na área do cliente demonstrativa."
+          : "Entre para acompanhar seus dados e pedidos, ou continue comprando como visitante."
       }
     >
       <div
@@ -30,7 +34,7 @@ function AccountPreview() {
           if ((e.target as HTMLElement).closest("a")) open(null);
         }}
       >
-        {demo ? (
+        {authed ? (
           <ButtonLink href="/conta">Ir para minha conta</ButtonLink>
         ) : (
           <>

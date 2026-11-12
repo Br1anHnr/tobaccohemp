@@ -7,9 +7,18 @@ async function enter(page: Page, path = "/") {
   await expect(page.getByRole("dialog")).toHaveCount(0);
 }
 
+// The customer backend is available only in development/test; the e2e suite
+// (production build) exercises the UI against these controlled fixtures.
+const signedOutSession = (route: import("@playwright/test").Route) =>
+  route.fulfill({ json: { data: null } });
+
 test("login validates and never fakes authentication or stores passwords", async ({
   page,
 }) => {
+  await page.route("**/api/auth/session", signedOutSession);
+  await page.route("**/api/auth/login", (route) =>
+    route.fulfill({ status: 401, json: { error: { code: "INVALID_CREDENTIALS", message: "Credenciais inválidas." } } }),
+  );
   await enter(page, "/conta/entrar");
   await page.getByRole("button", { name: "Entrar", exact: true }).click();
   await expect(page.locator(".error-summary")).toBeFocused();
@@ -21,9 +30,7 @@ test("login validates and never fakes authentication or stores passwords", async
     "text",
   );
   await page.getByRole("button", { name: "Entrar", exact: true }).click();
-  await expect(page.locator(".auth-notice")).toContainText(
-    "ainda não está ativa",
-  );
+  await expect(page.locator(".auth-notice")).toContainText("Credenciais inválidas.");
   await expect(page.getByLabel("Senha", { exact: true })).toHaveValue("");
   const stored = await page.evaluate(() =>
     JSON.stringify({ ...localStorage, ...sessionStorage }),
@@ -33,6 +40,7 @@ test("login validates and never fakes authentication or stores passwords", async
 });
 
 test("sign-up and password recovery validate fields", async ({ page }) => {
+  await page.route("**/api/auth/session", signedOutSession);
   await enter(page, "/conta/cadastro");
   await page.getByLabel("Nome completo").fill("Cliente Teste");
   await page.getByLabel("E-mail", { exact: true }).fill("invalido");
@@ -45,18 +53,53 @@ test("sign-up and password recovery validate fields", async ({ page }) => {
   await expect(summary).toContainText("não coincidem");
   await expect(summary).toContainText("18 anos");
   await page.goto("/conta/recuperar-senha");
-  await page.getByLabel("E-mail", { exact: true }).fill("cliente@example.com");
-  await page
-    .getByRole("button", { name: "Enviar instruções", exact: true })
-    .click();
-  await expect(page.locator(".auth-notice")).toContainText(
-    "Nenhum dado foi enviado",
+  await page.getByRole("button", { name: "Enviar instruções", exact: true }).click();
+  await expect(page.locator(".error-summary")).toContainText("e-mail válido");
+});
+
+test("sign-up creates an account and opens the customer area", async ({ page }) => {
+  await page.route("**/api/auth/session", signedOutSession);
+  await page.route("**/api/auth/signup", (route) => {
+    const body = route.request().postDataJSON();
+    return route.fulfill({
+      status: 201,
+      json: { data: { id: "e2e", name: body.name, email: body.email, phone: "", city: "", state: "", createdAt: "2026-01-01T00:00:00.000Z" } },
+    });
+  });
+  await enter(page, "/conta/cadastro");
+  await page.getByLabel("Nome completo").fill("Maria Cliente");
+  await page.getByLabel("E-mail", { exact: true }).fill("maria@example.com");
+  await page.getByLabel("Senha", { exact: true }).fill("senhaSegura123");
+  await page.getByLabel("Confirmar senha").fill("senhaSegura123");
+  await page.getByRole("checkbox", { name: /18 anos/ }).check();
+  await page.getByRole("checkbox", { name: /termos de uso/ }).check();
+  await page.getByRole("button", { name: "Criar conta", exact: true }).click();
+  await expect(page).toHaveURL(/\/conta$/);
+  await expect(page.locator(".account-hello")).toContainText("Maria");
+});
+
+test("password recovery requests a reset and applies a new password", async ({ page }) => {
+  await page.route("**/api/auth/session", signedOutSession);
+  await page.route("**/api/auth/password/forgot", (route) =>
+    route.fulfill({ json: { data: { message: "instruções", resetToken: "e2e-token" } } }),
   );
+  await page.route("**/api/auth/password/reset", (route) =>
+    route.fulfill({ json: { data: null } }),
+  );
+  await enter(page, "/conta/recuperar-senha");
+  await page.getByLabel("E-mail", { exact: true }).fill("cliente@example.com");
+  await page.getByRole("button", { name: "Enviar instruções", exact: true }).click();
+  await expect(page).toHaveURL(/redefinir-senha\?token=e2e-token/);
+  await page.getByLabel("Nova senha", { exact: true }).fill("novaSenha123");
+  await page.getByLabel("Confirmar nova senha").fill("novaSenha123");
+  await page.getByRole("button", { name: "Redefinir senha", exact: true }).click();
+  await expect(page.getByText("Senha redefinida com sucesso.")).toBeVisible();
 });
 
 test("demo customer area: overview, orders, reorder and profile", async ({
   page,
 }) => {
+  await page.route("**/api/auth/session", signedOutSession);
   await enter(page, "/conta");
   await expect(
     page.getByRole("heading", { name: "Entre para acessar sua conta." }),
@@ -127,6 +170,7 @@ test("catalog text search filters, shows empty state and syncs URL", async ({
 test("account screens have no basic accessibility violations", async ({
   page,
 }) => {
+  await page.route("**/api/auth/session", signedOutSession);
   await page.emulateMedia({ reducedMotion: "reduce" });
   await enter(page, "/conta/cadastro");
   for (const path of ["/conta/cadastro", "/conta/entrar", "/conta"]) {

@@ -28,7 +28,8 @@ const submitLabel: Record<Mode, string> = {
 
 export function AuthForm({ mode }: { mode: Mode }) {
   const router = useRouter();
-  const startDemo = useAccount((s) => s.startDemo);
+  const signIn = useAccount((s) => s.signIn);
+  const signUp = useAccount((s) => s.signUp);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<AuthResult | null>(null);
@@ -56,11 +57,11 @@ export function AuthForm({ mode }: { mode: Mode }) {
     setPending(true);
     const email = String(data.get("email")).trim();
     const password = String(data.get("password") ?? "");
-    const response =
+    const response: AuthResult =
       mode === "signin"
-        ? await authClient.signIn({ email, password })
+        ? await signIn({ email, password })
         : mode === "signup"
-          ? await authClient.signUp({
+          ? await signUp({
               email,
               password,
               name: String(data.get("name")).trim(),
@@ -71,6 +72,19 @@ export function AuthForm({ mode }: { mode: Mode }) {
       .querySelectorAll<HTMLInputElement>('input[name="password"], input[name="confirm"]')
       .forEach((input) => (input.value = ""));
     setPending(false);
+    if (response.ok) {
+      if (mode === "reset") {
+        if (response.resetToken) {
+          router.push(`/conta/redefinir-senha?token=${encodeURIComponent(response.resetToken)}`);
+          return;
+        }
+        setResult(response);
+        requestAnimationFrame(() => notice.current?.focus());
+        return;
+      }
+      router.push("/conta");
+      return;
+    }
     setResult(response);
     requestAnimationFrame(() => notice.current?.focus());
   }
@@ -87,23 +101,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
         >
           <Info size={17} aria-hidden="true" />
           <div>
-            <p>
-              {result.ok
-                ? "Tudo certo! Siga as próximas instruções."
-                : result.message}
-            </p>
-            {!result.ok && result.code === "not_configured" && mode !== "reset" && (
-              <button
-                type="button"
-                className="text-link"
-                onClick={() => {
-                  startDemo();
-                  router.push("/conta");
-                }}
-              >
-                Explorar a área do cliente demonstrativa
-              </button>
-            )}
+            <p>{result.ok ? (result.message ?? "Tudo certo!") : result.message}</p>
           </div>
         </div>
       )}
@@ -133,7 +131,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
           error={errors.email}
           hint={
             mode === "reset"
-              ? "Enviaremos um link de redefinição quando o serviço estiver ativo."
+              ? "Enviaremos as instruções de redefinição para este e-mail."
               : undefined
           }
         />

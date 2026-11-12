@@ -1,5 +1,5 @@
 "use client";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { Info, LayoutGrid, LogOut, Package, UserRound, Heart } from "lucide-react";
@@ -18,18 +18,25 @@ const links = [
 export function AccountShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { demo, hydrated, startDemo, endDemo, profile } = useAccount();
+  const { demo, hydrated, customer, startDemo, endDemo, signOut, loadSession, profile } = useAccount();
+  const [resolving, setResolving] = useState(() => !customer && !demo);
 
-  if (!hydrated) return <PageSkeleton label="Carregando sua conta…" />;
+  // Resolve the session cookie only inside the customer area (not on store pages).
+  useEffect(() => {
+    if (customer || demo) return;
+    loadSession().finally(() => setResolving(false));
+  }, [customer, demo, loadSession]);
 
-  if (!demo)
+  if (!hydrated || resolving) return <PageSkeleton label="Carregando sua conta…" />;
+
+  if (!customer && !demo)
     return (
       <div className="account-gate">
         <UserRound size={38} strokeWidth={1} aria-hidden="true" />
         <h2>Entre para acessar sua conta.</h2>
         <p>
-          A autenticação de clientes ainda não está ativa. Você pode conhecer a
-          área do cliente com dados demonstrativos.
+          Acompanhe seus dados e pedidos em um só lugar. Você também pode
+          conhecer a área do cliente com dados demonstrativos.
         </p>
         <div className="account-gate-actions">
           <ButtonLink href="/conta/entrar">Entrar</ButtonLink>
@@ -64,22 +71,26 @@ export function AccountShell({ children }: { children: ReactNode }) {
         <button
           type="button"
           className="account-signout"
-          onClick={() => {
-            endDemo();
+          onClick={async () => {
+            if (customer) await signOut();
+            else endDemo();
             router.push("/conta/entrar");
           }}
         >
-          <LogOut size={17} aria-hidden="true" /> Sair da demonstração
+          <LogOut size={17} aria-hidden="true" />
+          {customer ? "Sair" : "Sair da demonstração"}
         </button>
       </aside>
       <div className="account-content">
-        <div className="demo-note" role="note">
-          <Info size={17} aria-hidden="true" />
-          <p>
-            Área do cliente demonstrativa. Os dados e pedidos exibidos são
-            fictícios e nada é enviado a um servidor.
-          </p>
-        </div>
+        {!customer && (
+          <div className="demo-note" role="note">
+            <Info size={17} aria-hidden="true" />
+            <p>
+              Área do cliente demonstrativa. Os dados e pedidos exibidos são
+              fictícios e nada é enviado a um servidor.
+            </p>
+          </div>
+        )}
         {children}
       </div>
     </div>

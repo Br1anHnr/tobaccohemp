@@ -20,5 +20,5 @@ export interface CustomerOrder {
 
 /** Result returned by any authentication adapter (demo or real). */
 export type AuthResult =
-  | { ok: true }
-  | { ok: false; code: "not_configured" | "invalid" | "network"; message: string };
+  | { ok: true; account?: CustomerProfile; resetToken?: string; message?: string }
+  | { ok: false; code: "invalid" | "network" | "unavailable" | "rate_limit"; message: string };

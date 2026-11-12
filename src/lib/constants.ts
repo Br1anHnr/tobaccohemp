@@ -17,9 +17,9 @@ export const STORAGE = {
   // Stores only the demo-mode flag in sessionStorage; never credentials.
   demoAccount: "th-demo-account",
 };
-// Customer authentication stays disabled until a real backend is configured.
+// Customer authentication is backed by the `/api/auth/*` routes and Neon.
 export const AUTH = {
-  enabled: false,
+  enabled: true,
 };
 export const BRAZIL_STATES = [
   "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA",
