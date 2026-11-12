@@ -9,10 +9,13 @@ export function CartPage() {
   const hydrated = useCart((s) => s.hydrated);
   if (!hydrated) return <p role="status">Carregando seu carrinho…</p>;
   if (!items.length) return <EmptyState />;
+  const totalItems = cartCount(items);
   return (
     <div className="commerce-columns">
       <section aria-label="Itens do carrinho">
-        <p className="eyebrow">{cartCount(items)} itens na sua seleção</p>
+        <p className="eyebrow">
+          {totalItems} {totalItems === 1 ? "item" : "itens"} na sua seleção
+        </p>
         {items.map((item) => (
           <CartItem key={itemKey(item.productId, item.variant)} item={item} />
         ))}

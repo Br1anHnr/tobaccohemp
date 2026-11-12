@@ -25,15 +25,22 @@ export function Header() {
           <Logo />
         </Link>
         <nav className="desktop-nav" aria-label="Navegação principal">
-          {navigation.map((item) => (
-            <Link
-              key={item.label}
-              href={item.href}
-              aria-current={pathname === item.href ? "page" : undefined}
-            >
-              {item.label}
-            </Link>
-          ))}
+          {navigation.map((item) => {
+            const active =
+              item.href === "/categorias"
+                ? pathname === "/categorias" ||
+                  pathname.startsWith("/categoria/")
+                : pathname === item.href;
+            return (
+              <Link
+                key={item.label}
+                href={item.href}
+                aria-current={active ? "page" : undefined}
+              >
+                {item.label}
+              </Link>
+            );
+          })}
         </nav>
         <div className="header-actions">
           <button
@@ -41,7 +48,7 @@ export function Header() {
             onClick={() => open("search")}
             aria-label="Buscar produtos"
           >
-            <Search size={20} />
+            <Search size={20} aria-hidden="true" />
             <span>O que você procura?</span>
             <kbd>/</kbd>
           </button>
@@ -50,14 +57,14 @@ export function Header() {
             onClick={() => open("account")}
             aria-label="Minha conta"
           >
-            <UserRound size={21} />
+            <UserRound size={21} aria-hidden="true" />
           </button>
           <button
             className="icon-button cart-trigger"
             onClick={() => open("cart")}
             aria-label={`Abrir carrinho, ${cartCount(items)} ${cartCount(items) === 1 ? "item" : "itens"}`}
           >
-            <ShoppingBag size={22} />
+            <ShoppingBag size={22} aria-hidden="true" />
             <span className="cart-badge">{cartCount(items)}</span>
           </button>
           <button
@@ -65,7 +72,7 @@ export function Header() {
             onClick={() => open("menu")}
             aria-label="Abrir menu"
           >
-            <Menu size={23} />
+            <Menu size={23} aria-hidden="true" />
           </button>
         </div>
       </Container>

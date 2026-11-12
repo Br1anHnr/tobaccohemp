@@ -38,6 +38,62 @@ export function Catalog({ categorySlug }: { categorySlug?: string }) {
       );
     });
   };
+  const clearAll = () => {
+    startTransition(() => {
+      setOptimisticQuery("");
+      router.replace(categorySlug ? `/categoria/${categorySlug}` : "/loja", {
+        scroll: false,
+      });
+    });
+  };
+  const activeFilters = [
+    ...(!categorySlug && category
+      ? [
+          {
+            key: "categoria",
+            label: `Categoria: ${categories.find((c) => c.slug === category)?.name ?? category}`,
+            onClear: () => change("categoria", ""),
+          },
+        ]
+      : []),
+    ...(brand
+      ? [
+          {
+            key: "marca",
+            label: `Coleção: ${brand}`,
+            onClear: () => change("marca", ""),
+          },
+        ]
+      : []),
+    ...(onlyNew
+      ? [
+          {
+            key: "novidades",
+            label: "Apenas novidades",
+            onClear: () => change("novidades", ""),
+          },
+        ]
+      : []),
+    ...(maxPrice < 200
+      ? [
+          {
+            key: "preco",
+            label: `Até ${currency(maxPrice)}`,
+            onClear: () => change("preco", ""),
+          },
+        ]
+      : []),
+    ...(query.trim()
+      ? [
+          {
+            key: "q",
+            label: `Busca: “${query.trim()}”`,
+            onClear: () => change("q", ""),
+          },
+        ]
+      : []),
+  ];
+  const sidebarFilterCount = activeFilters.filter((f) => f.key !== "q").length;
   const visible = useMemo(
     () =>
       products
@@ -97,12 +153,16 @@ export function Catalog({ categorySlug }: { categorySlug?: string }) {
           {visible.length} {visible.length === 1 ? "produto" : "produtos"}
         </span>
         <button
+          type="button"
           className="filter-toggle button button-secondary"
           aria-expanded={filtersOpen}
           aria-controls="catalog-filters"
           onClick={() => setFiltersOpen(!filtersOpen)}
         >
-          <SlidersHorizontal size={16} /> Filtros
+          <SlidersHorizontal size={16} aria-hidden="true" /> Filtros
+          {sidebarFilterCount > 0 && (
+            <span className="filter-count">{sidebarFilterCount}</span>
+          )}
         </button>
         <label className="sort-label">
           Ordenar por{" "}
@@ -118,6 +178,26 @@ export function Catalog({ categorySlug }: { categorySlug?: string }) {
           </select>
         </label>
       </div>
+      {activeFilters.length > 0 && (
+        <div className="active-filters" aria-label="Filtros ativos">
+          {activeFilters.map((filter) => (
+            <button
+              key={filter.key}
+              type="button"
+              className="filter-chip"
+              onClick={filter.onClear}
+            >
+              <span>{filter.label}</span>
+              <X size={13} aria-hidden="true" />
+            </button>
+          ))}
+          {activeFilters.length > 1 && (
+            <button type="button" className="text-link" onClick={clearAll}>
+              Limpar tudo
+            </button>
+          )}
+        </div>
+      )}
       <div className="catalog-layout">
         <aside
           id="catalog-filters"
@@ -175,16 +255,8 @@ export function Catalog({ categorySlug }: { categorySlug?: string }) {
               onChange={(e) => change("preco", e.target.value)}
             />
           </label>
-          <button
-            className="text-link"
-            onClick={() =>
-              router.replace(
-                categorySlug ? `/categoria/${categorySlug}` : "/loja",
-                { scroll: false },
-              )
-            }
-          >
-            <X size={14} /> Limpar filtros
+          <button type="button" className="text-link" onClick={clearAll}>
+            <X size={14} aria-hidden="true" /> Limpar filtros
           </button>
         </aside>
         <div>
@@ -203,13 +275,9 @@ export function Catalog({ categorySlug }: { categorySlug?: string }) {
                   : "Experimente outra categoria ou ajuste os filtros."}
               </p>
               <button
+                type="button"
                 className="button button-secondary"
-                onClick={() =>
-                  router.replace(
-                    categorySlug ? `/categoria/${categorySlug}` : "/loja",
-                    { scroll: false },
-                  )
-                }
+                onClick={clearAll}
               >
                 Limpar filtros
               </button>

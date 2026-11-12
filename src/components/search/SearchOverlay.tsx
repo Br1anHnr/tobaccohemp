@@ -2,16 +2,20 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { Search, ArrowUpRight } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Search, ArrowUpRight, X } from "lucide-react";
 import { products } from "@/data/products";
 import { normalize } from "@/lib/utils";
 import { currency } from "@/lib/currency";
 import { useCart } from "@/store/cart-store";
 import { Modal } from "@/components/ui/Modal";
+const suggestions = ["Case", "Bolsa", "Bandeja", "Organizador", "Kit"];
 export function SearchOverlay() {
+  const router = useRouter();
   const overlay = useCart((s) => s.overlay);
   const open = useCart((s) => s.setOverlay);
   const [query, setQuery] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
@@ -29,13 +33,13 @@ export function SearchOverlay() {
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [open]);
-  const results = products
-    .filter((p) =>
-      normalize([p.name, p.brand, p.category, ...p.tags].join(" ")).includes(
-        normalize(query.trim()),
-      ),
-    )
-    .slice(0, 8);
+  const trimmed = query.trim();
+  const allMatches = products.filter((p) =>
+    normalize([p.name, p.brand, p.category, ...p.tags].join(" ")).includes(
+      normalize(trimmed),
+    ),
+  );
+  const results = allMatches.slice(0, 8);
   return (
     <Modal
       open={overlay === "search"}
@@ -45,23 +49,62 @@ export function SearchOverlay() {
       className="search-modal"
     >
       <label className="search-field">
-        <Search size={20} />
+        <Search size={20} aria-hidden="true" />
         <span className="sr-only">Buscar produtos</span>
         <input
+          ref={inputRef}
           autoFocus
           value={query}
+          maxLength={80}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="O que você procura?"
           onKeyDown={(e) => {
             if (e.key === "ArrowDown") {
               e.preventDefault();
               list.current?.querySelector<HTMLAnchorElement>("a")?.focus();
+            } else if (e.key === "Enter" && trimmed) {
+              e.preventDefault();
+              open(null);
+              router.push(`/loja?q=${encodeURIComponent(trimmed)}`);
             }
           }}
         />
+        {query && (
+          <button
+            type="button"
+            className="search-clear"
+            aria-label="Limpar busca"
+            onClick={() => {
+              setQuery("");
+              inputRef.current?.focus();
+            }}
+          >
+            <X size={16} aria-hidden="true" />
+          </button>
+        )}
       </label>
+      {!trimmed && (
+        <div className="search-suggestions" aria-label="Sugestões de busca">
+          {suggestions.map((term) => (
+            <button
+              key={term}
+              type="button"
+              onClick={() => {
+                setQuery(term);
+                inputRef.current?.focus();
+              }}
+            >
+              {term}
+            </button>
+          ))}
+        </div>
+      )}
       <p className="search-count" role="status">
-        {query ? `${results.length} resultados` : "Explore nossa seleção"}
+        {trimmed
+          ? allMatches.length > results.length
+            ? `Mostrando ${results.length} de ${allMatches.length} resultados`
+            : `${allMatches.length} ${allMatches.length === 1 ? "resultado" : "resultados"}`
+          : "Explore nossa seleção"}
       </p>
       <div
         className="search-results"
@@ -87,13 +130,13 @@ export function SearchOverlay() {
             href={`/produto/${p.slug}`}
             onClick={() => open(null)}
           >
-            <Image src={p.image} alt="" width={64} height={64} />
+            <Image src={p.image} alt="" width={64} height={64} sizes="64px" />
             <span>
               <strong>{p.name}</strong>
               <small>{p.category}</small>
             </span>
             <b>{currency(p.price)}</b>
-            <ArrowUpRight size={17} />
+            <ArrowUpRight size={17} aria-hidden="true" />
           </Link>
         ))}
         {!results.length && (
@@ -102,13 +145,13 @@ export function SearchOverlay() {
           </p>
         )}
       </div>
-      {query.trim() && results.length > 0 && (
+      {trimmed && allMatches.length > 0 && (
         <Link
           className="text-link search-all"
-          href={`/loja?q=${encodeURIComponent(query.trim())}`}
+          href={`/loja?q=${encodeURIComponent(trimmed)}`}
           onClick={() => open(null)}
         >
-          Ver todos os resultados na loja <ArrowUpRight size={15} />
+          Ver todos os resultados na loja <ArrowUpRight size={15} aria-hidden="true" />
         </Link>
       )}
     </Modal>

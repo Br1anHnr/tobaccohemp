@@ -873,6 +873,46 @@ main:focus {
   grid-template-columns: 190px minmax(0, 1fr);
   gap: 32px;
 }
+.filter-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding-inline: 5px;
+  border-radius: 999px;
+  background: var(--brand-yellow);
+  color: #111;
+  font-size: 10px;
+  font-weight: 800;
+}
+.active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: -14px 0 24px;
+}
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid #48463e;
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: 11px;
+}
+.filter-chip:hover {
+  border-color: var(--brand-yellow);
+}
+.stock-limit {
+  display: block;
+  margin-top: 6px;
+  color: var(--brand-orange);
+  font-size: 11px;
+}
 .catalog .product-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -1275,12 +1315,45 @@ main:focus {
   gap: 13px;
   border: 1px solid #58503e;
   border-radius: 5px;
-  padding-left: 14px;
+  padding-inline: 14px 8px;
   margin-top: 28px;
 }
 .search-field input {
   border: 0;
   background: transparent;
+}
+.search-clear {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+  display: grid;
+  place-items: center;
+}
+.search-clear:hover {
+  color: var(--foreground);
+  background: #ffffff12;
+}
+.search-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+.search-suggestions button {
+  min-height: 32px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--foreground);
+  font-size: 11px;
+}
+.search-suggestions button:hover {
+  border-color: var(--brand-yellow);
 }
 .search-count {
   color: var(--muted);
@@ -1385,12 +1458,25 @@ main:focus {
   align-items: center;
   border-bottom: 1px solid var(--border);
 }
+.mobile-menu nav a[aria-current="page"] {
+  color: var(--brand-yellow);
+}
+.mobile-menu-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+}
 .menu-categories {
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
   margin-top: 20px;
   color: #bcb8ab;
+}
+.menu-categories a[aria-current="page"] {
+  color: var(--brand-yellow);
+  text-decoration: underline;
+  text-underline-offset: 4px;
 }
 .account-links {
   display: flex;
@@ -1628,6 +1714,8 @@ main:focus {
   }
   .header-search {
     width: 44px;
+    min-height: 44px;
+    border-radius: 50%;
     border: 0;
     background: transparent;
     justify-content: center;
@@ -1734,7 +1822,7 @@ main:focus {
     width: 100%;
   }
   .utility-bar {
-    font-size: 8px;
+    font-size: 10px;
   }
   .header .container {
     height: 88px;
@@ -1774,8 +1862,8 @@ main:focus {
     z-index: 1;
   }
   .hero-copy > .eyebrow {
-    font-size: 7px;
-    letter-spacing: 0.15em;
+    font-size: 9px;
+    letter-spacing: 0.14em;
     margin-bottom: 17px;
   }
   .hero h1 {
@@ -1887,7 +1975,7 @@ main:focus {
     min-height: 34px;
   }
   .product-info > p {
-    font-size: 8px;
+    font-size: 10px;
   }
   .product-bottom {
     margin-top: 11px;
@@ -1904,20 +1992,20 @@ main:focus {
     font-size: 9px;
   }
   .add-compact {
-    width: 34px;
-    height: 34px;
+    width: 40px;
+    height: 40px;
     flex-shrink: 0;
   }
   .favorite-button {
     top: 4px;
     right: 4px;
-    width: 35px;
-    height: 35px;
+    width: 40px;
+    height: 40px;
   }
   .badge {
     left: 9px;
     top: 12px;
-    font-size: 7px;
+    font-size: 9px;
     padding: 3px 6px;
   }
   .featured-section {
@@ -2014,7 +2102,7 @@ main:focus {
   .footer-bottom {
     flex-direction: column;
     gap: 7px;
-    font-size: 8px;
+    font-size: 11px;
   }
   .page-container {
     padding-top: 24px;
@@ -2038,6 +2126,13 @@ main:focus {
     gap: 13px;
     padding-block: 13px;
     font-size: 11px;
+  }
+  .catalog-search {
+    flex: 1 1 100%;
+    max-width: none;
+  }
+  .catalog-search input {
+    font-size: 16px;
   }
   .sort-label {
     margin-left: auto;
@@ -2109,7 +2204,7 @@ main:focus {
     padding-inline: 11px;
   }
   .product-buy .quantity button {
-    width: 28px;
+    width: 38px;
   }
   .related-section {
     margin-top: 45px;

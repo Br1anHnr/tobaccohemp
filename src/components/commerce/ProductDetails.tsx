@@ -24,18 +24,21 @@ export function ProductDetails({ product }: { product: Product }) {
           />
           {product.isNew && <span className="badge">Novo na seleção</span>}
         </div>
-        <div className="gallery-thumbs">
-          {gallery.map((src, index) => (
-            <button
-              key={src}
-              aria-label={`Ver imagem ${index + 1} de ${product.name}`}
-              aria-pressed={image === src}
-              onClick={() => setImage(src)}
-            >
-              <Image src={src} alt="" width={90} height={90} />
-            </button>
-          ))}
-        </div>
+        {gallery.length > 1 && (
+          <div className="gallery-thumbs">
+            {gallery.map((src, index) => (
+              <button
+                key={src}
+                type="button"
+                aria-label={`Ver imagem ${index + 1} de ${product.name}`}
+                aria-pressed={image === src}
+                onClick={() => setImage(src)}
+              >
+                <Image src={src} alt="" width={90} height={90} sizes="90px" />
+              </button>
+            ))}
+          </div>
+        )}
         <small>
           Imagem ilustrativa. A aparência e as variações do produto devem ser
           confirmadas com a loja.
@@ -62,7 +65,7 @@ export function ProductDetails({ product }: { product: Product }) {
                     onChange={() => setVariant(v)}
                   />
                   <span>{v}</span>
-                  {variant === v && <Check size={14} />}
+                  {variant === v && <Check size={14} aria-hidden="true" />}
                 </label>
               ))}
             </div>
@@ -81,8 +84,14 @@ export function ProductDetails({ product }: { product: Product }) {
             variant={variant}
           />
         </div>
+        {quantity >= product.stock && product.stock > 0 && (
+          <small className="stock-limit">
+            Limite de {product.stock} unidades disponíveis nesta seleção.
+          </small>
+        )}
         <p className="product-note">
-          <Package size={16} /> Entrega a combinar. Preço demonstrativo.
+          <Package size={16} aria-hidden="true" /> Entrega a combinar. Preço
+          demonstrativo.
         </p>
         <details open>
           <summary>Sobre este essencial</summary>

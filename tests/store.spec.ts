@@ -428,3 +428,42 @@ test("corrupt storage recovers without crashing and reduced motion stays operabl
     ),
   ).toBeTruthy();
 });
+
+test("storefront polish: search clear/enter, active filter chips and stock limit notice", async ({
+  page,
+}, testInfo) => {
+  await enter(page);
+  await page.getByRole("button", { name: "Buscar produtos" }).click();
+  const search = page.getByRole("textbox", { name: "Buscar produtos" });
+  await page
+    .getByRole("button", { name: "Case", exact: true })
+    .click();
+  await expect(search).toHaveValue("Case");
+  await page.getByRole("button", { name: "Limpar busca" }).click();
+  await expect(search).toHaveValue("");
+  await expect(search).toBeFocused();
+  await search.fill("bandeja");
+  await search.press("Enter");
+  await expect(page).toHaveURL(/\/loja\?q=bandeja/);
+  const activeFilters = page.getByLabel("Filtros ativos");
+  await expect(activeFilters).toContainText("Busca: “bandeja”");
+  await activeFilters.getByRole("button", { name: /Busca:/ }).click();
+  await expect(page).toHaveURL(/\/loja$/);
+
+  if (testInfo.project.name === "mobile") {
+    await page.getByRole("button", { name: "Abrir menu" }).click();
+    const mobileNav = page.getByRole("navigation", { name: "Menu mobile" });
+    await expect(
+      mobileNav.getByRole("link", { name: "Loja", exact: true }),
+    ).toHaveAttribute("aria-current", "page");
+    await expect(
+      page.getByRole("dialog").getByRole("link", { name: "Favoritos" }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+  }
+
+  await page.goto("/produto/kit-rotina");
+  for (let i = 1; i < 5; i++)
+    await page.getByRole("button", { name: /Aumentar quantidade/ }).click();
+  await expect(page.locator(".stock-limit")).toContainText("Limite de 5");
+});

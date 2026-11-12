@@ -17,6 +17,7 @@ export function CartItem({ item }: { item: Item }) {
   const otherCount = items
     .filter((i) => i.productId === item.productId && i.variant !== item.variant)
     .reduce((sum, i) => sum + i.quantity, 0);
+  const maxAvailable = Math.max(1, product.stock - otherCount);
   return (
     <div className="cart-item">
       <Link
@@ -34,9 +35,14 @@ export function CartItem({ item }: { item: Item }) {
         <QuantitySelector
           value={item.quantity}
           onChange={(value) => update(item.productId, item.variant, value)}
-          max={product.stock - otherCount}
+          max={maxAvailable}
           label={product.name}
         />
+        {item.quantity >= maxAvailable && (
+          <small className="stock-limit">
+            Limite de {maxAvailable} {maxAvailable === 1 ? "unidade" : "unidades"}
+          </small>
+        )}
       </div>
       <div className="cart-item-end">
         <strong>{currency(product.price * item.quantity)}</strong>
