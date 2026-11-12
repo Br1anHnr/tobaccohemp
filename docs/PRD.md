@@ -1,9 +1,9 @@
 # PRD — Tobacco Hemp
 
-**Versão:** 1.2 — Revisão de evidências de código  
+**Versão:** 1.3 — Integração das branches e validação local  
 **Data:** 12/11/2026  
 **Status:** documento de trabalho; decisões de checkout e integração comercial pendentes de homologação  
-**Base:** plano técnico de 09/11/2026, PRD v1.0/v1.1 e inspeção direta do código e testes (12/11/2026).
+**Base:** plano técnico de 09/11/2026, PRD v1.0–v1.2 e integração/validação local das branches (12/11/2026).
 
 ## 1. Visão e premissas confirmadas pelo negócio
 
@@ -34,7 +34,7 @@ Construir uma plataforma digital independente para a **Tobacco Hemp**, com vitri
 |---|---|---|---|
 | TH-01 | Home, catálogo, categorias, produto, carrinho e favoritos demonstrativos | [x] | MVP e testes de navegação existentes; pedidos não são reais |
 | TH-02 | Identidade visual Tobacco Hemp e experiência mobile | [x] | Base existente; refinamentos adicionais no TH-03 |
-| TH-03 | Melhorias de busca, filtros, navegação mobile, imagens e acessibilidade | [-] | `feature/storefront-polish`, commit `571aa48`; 24/24 testes no escopo; integrar |
+| TH-03 | Melhorias de busca, filtros, navegação mobile, imagens e acessibilidade | [x] | `feature/storefront-polish` (`571aa48`) integrado em `feature/integracao-v2`; validado por lint, typecheck, build e 50/50 E2E (desktop+mobile) |
 | TH-04 | Banco PostgreSQL Neon, migrations e seed do catálogo | [x] | `feature/backend-neon`, persistência validada localmente |
 | TH-05 | Dashboard administrativo com produtos, estoque, clientes e métricas | [x] | API própria, testes com Neon e 44/44 E2E locais; não habilitado publicamente |
 | TH-06 | Adicionar produtos pelo painel | [x] | `POST /api/admin/products` + `ProductForm` (nome, SKU, preço); testado em `tests/integration/admin.spec.ts` |
@@ -43,7 +43,7 @@ Construir uma plataforma digital independente para a **Tobacco Hemp**, com vitri
 | TH-09 | Upload e gerenciamento de imagens de produtos | [ ] | Nenhum campo de imagem no schema (`migrate.ts`) nem no `ProductInput`; object storage ainda não escolhido |
 | TH-10 | Catálogo público refletir CRUD do Neon | [~] | `Catalog.tsx` ainda lê `src/data/products.ts` (estático); `seed.ts` popula o Neon, mas a vitrine não lê o banco |
 | TH-11 | Login administrativo seguro e sessões prontas para Preview/produção | [ ] | Sessão httpOnly/SameSite=Strict testada; `admin-http.ts` ainda bloqueia com `503` fora de dev/test |
-| TH-12 | Cadastro, login, recuperação e perfil reais do cliente | [-] | `feature/customer-auth` (`0d09758`); branch atual mantém `AUTH.enabled=false` e auth placeholder |
+| TH-12 | Cadastro, login, recuperação e perfil reais do cliente | [x] | `feature/customer-auth` (`0d09758`) integrado; `AUTH.enabled=true`; fluxo completo validado contra Neon (6/6 integração, desktop+mobile) |
 | TH-13 | WhatsApp como canal de atendimento geral | [x] | Canal já usado pelo negócio, **sem afirmar integração técnica ao site** |
 | TH-14 | Botão/link para abrir WhatsApp no site | [~] | Componente existe em `contato/page.tsx`, mas `STORE.whatsapp` está vazio (link não funcional) |
 | TH-15 | Integração Evolution API e centralização de contatos/conversas | [ ] | Planejar canal, eventos, persistência mínima e segurança |
@@ -52,9 +52,9 @@ Construir uma plataforma digital independente para a **Tobacco Hemp**, com vitri
 | TH-18 | Checkout no site com Pix/cartão e confirmação | [?] | PagBank e Asaas em comparação; sandbox, elegibilidade e contrato pendentes |
 | TH-19 | Opção adicional de continuar via WhatsApp e receber link de Pix | [?] | Arquitetura definida; uso condicionado à elegibilidade da transação e políticas dos provedores |
 | TH-20 | Painel de pedidos, pagamentos, estornos e relatórios | [ ] | Dados verdadeiros a partir de eventos confirmados; não usar métricas demonstrativas como vendas |
-| TH-21 | Integração de branches e testes de regressão completos | [ ] | Integrar `customer-auth`, `storefront-polish` e backend em branch de integração |
+| TH-21 | Integração de branches e testes de regressão completos | [x] | `customer-auth` (`0d09758`), `storefront-polish` (`571aa48`) e `docs/prd-tobacco` (`b6a20f5`) integrados em `feature/integracao-v2`; lint, typecheck, build, 50 E2E e 6 integração aprovados |
 
-**Observação de evidência:** inspeção direta do código da branch atual (`docs/prd-tobacco` = `feature/backend-neon` @ `08bd0ec`) e dos diffs de `feature/customer-auth` (`0d09758`) e `feature/storefront-polish` (`571aa48`). Lacunas de CRUD de produtos, catálogo dinâmico, checkout e Evolution API foram confirmadas no código, não apenas em relatórios.
+**Observação de evidência:** inspeção direta do código da branch atual e dos diffs de `feature/customer-auth` (`0d09758`) e `feature/storefront-polish` (`571aa48`). Lacunas de CRUD de produtos, catálogo dinâmico, checkout e Evolution API foram confirmadas no código, não apenas em relatórios.
 
 ## 3. Personas e jornadas
 
@@ -199,3 +199,5 @@ Outras exigências: proteção de dados (LGPD), sessões administrativas persist
 **Controle de alteração v1.1:** incorporadas premissas reais do negócio (sem cigarros eletrônicos, WhatsApp já ativo, Evolution preferida e cliente com maquininha PagBank); checkout no site + opção de link Pix via WhatsApp; comparação PagBank/Asaas; CRUD administrativo completo com imagem e efeito na vitrine; revisão de status e prioridades. **Nenhuma integração de pagamento ou WhatsApp foi ativada por este documento.**
 
 **Controle de alteração v1.2:** coluna de evidência da tabela de status atualizada com base em inspeção direta do código e dos testes (TH-06 a TH-14); sem alteração de decisões de negócio. Confirmadas as lacunas: CRUD restrito a nome/SKU/preço/ativo (sem descrição, categoria, imagens, exclusão lógica ou UI de edição), catálogo público ainda estático, checkout PagBank/Asaas não iniciado e Evolution API não implementada.
+
+**Controle de alteração v1.3:** branches `feature/customer-auth` (`0d09758`), `feature/storefront-polish` (`571aa48`) e `docs/prd-tobacco` (`b6a20f5`) integradas em `feature/integracao-v2` via cherry-pick, sem conflitos. Validação local executada: lint, typecheck e build aprovados; 50 testes E2E (desktop+mobile) e 6 testes de integração contra o Neon (login/cadastro/sessão/perfil de cliente, dashboard administrativo, catálogo e carrinho; migrations `001_init` e `002_customer_auth` idempotentes) aprovados. Status TH-03, TH-12 e TH-21 atualizados para `[x]`. Nenhuma operação destrutiva executada no Neon; nenhum push, deploy ou merge em `main` realizado.
