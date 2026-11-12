@@ -1,12 +1,12 @@
 import type { Customer, AdminProduct, DashboardMetrics } from "@/types/admin";
 import { currency } from "@/lib/currency";
-import { adminEndpoints } from "@/types/golden-admin";
+import { adminEndpoints } from "@/shared/contracts/admin";
 import type {
-  AdminUser, Customer as WireCustomer, Product, InventoryItem,
+  AdminUser, Customer as WireCustomer, Product, ProductInput, InventoryItem,
   DashboardMetrics as WireMetrics, DataResponse, LoginInput,
-} from "@/types/golden-admin";
+} from "@/shared/contracts/admin";
 
-export const sessionExpiredEvent = "golden-admin-session-expired";
+export const sessionExpiredEvent = "th-admin-session-expired";
 
 export class AdminApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -63,6 +63,12 @@ export const updateStock = (id: string, quantity: number, reorderPoint: number) 
   request<InventoryItem>(`${adminEndpoints.inventory}/${encodeURIComponent(id)}`, {
     method: "PATCH", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ quantity, reorderPoint }),
+  });
+
+export const createProduct = (input: ProductInput) =>
+  request<Product>(adminEndpoints.products, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
   });
 
 export async function fetchDashboard(): Promise<DashboardMetrics> {

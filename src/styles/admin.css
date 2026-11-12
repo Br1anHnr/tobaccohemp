@@ -23,6 +23,11 @@
 .admin-login-card form { display: grid; gap: 12px; margin-top: 24px; }
 .admin-login-card input { width: 100%; padding: 12px; color: var(--foreground); background: var(--background); border: 1px solid var(--border); border-radius: var(--radius-sm); }
 
+/* Formulário de cadastro de produto ----------------------------------- */
+.admin-form { display: grid; gap: 14px; margin-top: 20px; }
+.admin-form [role="alert"] { color: var(--danger, #f28b82); font-size: 12px; }
+.admin-form__actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 4px; }
+
 .admin-shell {
   min-height: 100dvh;
   display: grid;
@@ -453,6 +458,12 @@
 }
 
 /* Tabela de dados ------------------------------------------------------ */
+.admin-table-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 14px;
+}
+
 .table-card {
   background: var(--surface);
   border: 1px solid var(--border);

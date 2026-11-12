@@ -7,6 +7,7 @@ import { fetchProducts, updateStock } from "@/lib/admin-service";
 import { useResource } from "@/lib/use-resource";
 import { DataTable, type Column, type Filter } from "./DataTable";
 import { StatusBadge } from "./Badge";
+import { ProductForm } from "./ProductForm";
 import type { AdminProduct } from "@/types/admin";
 
 const filtersFor = (rows: AdminProduct[]): Filter<AdminProduct>[] => [
@@ -34,6 +35,7 @@ export function ProductsTable() {
   const { status, data, retry, fail } = useResource(fetchProducts);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState("");
+  const [createOpen, setCreateOpen] = useState(false);
   const busy = useRef(false);
   const rows = data ?? [];
   const filters = useMemo(() => filtersFor(data ?? []), [data]);
@@ -119,6 +121,15 @@ export function ProductsTable() {
   return (
     <>
     {mutationError && <p role="alert">{mutationError}</p>}
+    <div className="admin-table-actions">
+      <button
+        type="button"
+        className="button button-primary"
+        onClick={() => setCreateOpen(true)}
+      >
+        Cadastrar produto
+      </button>
+    </div>
     <DataTable<AdminProduct>
       columns={columns}
       rows={rows}
@@ -130,6 +141,11 @@ export function ProductsTable() {
       onSimulateError={fail}
       emptyTitle="Nenhum produto encontrado."
       emptyText="Ajuste a busca ou os filtros para ver os produtos e o estoque."
+    />
+    <ProductForm
+      open={createOpen}
+      onClose={() => setCreateOpen(false)}
+      onCreated={retry}
     />
     </>
   );

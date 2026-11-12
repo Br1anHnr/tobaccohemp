@@ -1,42 +1,29 @@
-# Dashboard conectado à Golden Image — desenvolvimento local
+# Dashboard conectado ao Neon — desenvolvimento local
 
-A interface administrativa existente usa `/api/admin/*` por um proxy server-only.
-O proxy aceita somente as operações do contrato, limita o destino a HTTP loopback,
-valida Origin nas mutações antes de traduzir a origem para o backend e encaminha
-apenas o cookie administrativo. Não há CORS aberto, tokens no localStorage ou senha
-do operador no bundle do dashboard. Fora de development/test, o proxy retorna 503.
+A interface administrativa em `/admin` usa as próprias rotas `/api/admin/*` do
+Next.js, que persistem em PostgreSQL (Neon) via `pg`. Não há proxy externo,
+backend separado nem mocks: o catálogo é semeado a partir de `src/data` e todas
+as mutações confirmam no banco. Fora de `development`/`test`, o backend responde
+**503** de propósito — esta proteção permanece nesta etapa.
 
-Terminal no checkout **main da Golden Image**:
+## Pré-requisitos
 
-```powershell
-npm.cmd ci
-$env:GOLDEN_IMAGE_ADMIN_PASSWORD = 'synthetic-local-only-password'
-npm.cmd run dev -- --hostname 127.0.0.1 --port 3101
-```
+- Node.js 20.9+ (validado com Node.js 24).
+- Uma instância Neon com um banco e uma string de conexão (o pooler serverless é
+  recomendado para produção).
 
-Terminal neste worktree **feature-admin-dashboard-ui da Tobacco Hemp**:
+## Executar
 
 ```powershell
 npm.cmd ci
-# Opcional: padrão já é http://127.0.0.1:3101; só destinos locais são aceitos.
-$env:GOLDEN_IMAGE_API_ORIGIN = 'http://127.0.0.1:3101'
-npm.cmd run dev -- --port 3000
+$env:DATABASE_URL = 'postgresql://USER:PASSWORD@HOST/DB?sslmode=require'
+$env:ADMIN_PASSWORD = 'synthetic-local-only-password'
+npm.cmd run dev
 ```
 
-Abra http://127.0.0.1:3000/admin. Entre com `admin@example.test` e a senha sintética
-do primeiro terminal. Sem backend/configuração, mostrar erro; nunca voltar aos mocks.
-Se já houver servidor deste dashboard ativo em 3000, reutilize-o em vez de iniciar
-outro. Alterar o destino por ambiente requer reiniciar apenas o servidor do dashboard.
-
-Os componentes conservam o shell, marca, tabelas e responsividade. O adaptador
-converte centavos para BRL, combina produto/estoque e converte status/data de clientes.
-Categorias, telefone, cidade, gastos e pedidos não existem no contrato atual:
-campos ausentes mostram “—”/“Não informado”, sem inventar métricas.
-Cards usam clientes/produtos/unidades/valor de estoque; gráficos de receitas mostram
-indisponibilidade explícita. Botões de estoque persistem via PATCH com confirmação
-do servidor; falhas não alteram o valor exibido. Login, expiração/401 e logout usam
-cookie HttpOnly/SameSite Strict. Não há checkout, pagamentos ou vendas nesta conexão;
-as demonstrações da loja permanecem independentes, sem novas integrações comerciais.
+Abra http://127.0.0.1:3000/admin. Entre com `admin@example.test` e a senha de
+`ADMIN_PASSWORD`. O schema é criado e o catálogo é semeado na primeira requisição
+(`src/shared/server/migrate.ts` e `seed.ts`), de forma idempotente.
 
 ## Verificar
 
@@ -44,40 +31,49 @@ as demonstrações da loja permanecem independentes, sem novas integrações com
 npm.cmd run lint
 npm.cmd run typecheck
 npm.cmd run build
-$env:GOLDEN_IMAGE_BACKEND_DIR = 'C:/caminho/para/GoldenImage'
+# Integração com o Neon real (cria e limpa um produto E2E por execução):
+$env:DATABASE_URL = 'postgresql://USER:PASSWORD@HOST/DB?sslmode=require'
 npm.cmd run test:integration
-# Regressão visual/loja, em porta livre, contra o build local:
+# Regressão visual/loja em porta livre, contra o build local:
 $env:PLAYWRIGHT_BASE_URL = 'http://127.0.0.1:3220'
 $env:CI = '1'
 npm.cmd run test:e2e
 ```
 
-Integração sobe dois servidores temporários em 3210/3211, sem reutilizar processos
-existentes, usa senha/fixtures sintéticas e valida desktop/celular: login, rejeição
-de origem, cookie, dados reais, estoque após reload, erro sem atualização otimista,
-indisponibilidade sem mocks, logout e acessibilidade. As fixtures permanecem somente
-no SQLite local ignorado da Golden Image, como nos testes do próprio backend.
-O cache de teste do dashboard fica em `.next-integration` para não disputar o
-servidor de desenvolvimento existente. A suíte visual usa fixtures HTTP explícitas,
-separadas do teste com backend real. Capturas novas: `artifacts/admin-connected-*.png`.
+A suíte de integração sobe um único servidor temporário em 3210 (cache em
+`.next-integration`), sem reutilizar processos existentes, e valida desktop e
+celular: login, rejeição de origem, cookie, cadastro de produto pela interface,
+estoque após reload, indicadores, ausência de fallback para mocks, logout e
+acessibilidade. Cada execução cria um produto com SKU `E2E-*` e o remove ao
+final (via `pg`); os dois produtos `E2E-*` remanescentes da missão anterior
+foram removidos manualmente do banco.
 
-Esta conexão não habilita produção. SQLite e sessões em memória seguem os limites
-locais do backend. O contrato wire v1 foi copiado de
-`GoldenImage/src/shared/contracts/admin.ts` para `src/types/golden-admin.ts`;
-mudanças futuras de contrato precisam ser sincronizadas deliberadamente.
+## O que falta para um Preview da Vercel (não feito nesta missão)
+
+O bloqueio **503** foi mantido de propósito. Para disponibilizar o dashboard com
+autenticação segura em um Preview, ainda é necessário:
+
+1. **Remover o bloqueio 503** de forma controlada (por variável de ambiente de
+   deploy, nunca incondicional) e habilitar o backend em produção.
+2. **Sessões serverless**: substituir o `Map` em memória
+   (`src/modules/auth/infrastructure/admin-auth.ts`) por um token assinado em
+   cookie httpOnly ou um armazenamento distribuído (ex.: Upstash/Redis ou
+   sessões no banco). O estado atual não sobrevive a cold starts nem escala
+   entre instâncias.
+3. **Contas e segredos**: trocar a senha única em `ADMIN_PASSWORD` comparada por
+   hash por usuários reais com senha hash (bcrypt/argon2), e mover segredos para
+   as Environment Variables da Vercel.
+4. **Migrações**: executar `migrate.ts`/`seed.ts` em uma etapa de build/CI em vez
+   de lazy na primeira requisição de cada cold start.
+5. **Driver/conexão**: usar o pooler do Neon (já configurado) ou
+   `@neondatabase/serverless` para conexões em ambiente serverless.
+6. **Defesa em profundidade**: rate limiting distribuído e, opcionalmente, token
+   CSRF (o Origin + `SameSite=Strict` já é uma base válida).
 
 ## Resultado desta conexão
 
-- Lint, TypeScript e build aprovados, sem novas dependências ou mudança do lockfile.
-- Dois testes de integração com backend real aprovados (desktop/celular), incluindo
-  login/logout, cookie, origem, clientes, centavos, estoque após reload, falha de PATCH,
-  indisponibilidade sem fallback, acessibilidade e largura da página.
-- Regressão completa: 32 de 34 cenários passaram inicialmente; os dois casos de
-  persistência do carrinho recarregavam antes de a navegação terminar. Foi adicionada
-  somente uma espera pela URL `/carrinho` no teste, mantendo suas asserções. Os dois
-  casos passaram na repetição dirigida, sem alterar o código de carrinho/checkout.
-- Proxy desabilitado em produção verificado em desktop/celular pelo build local.
-- Capturas desktop/celular inspecionadas; logo, shell, tabelas e estrutura preservados.
-- Servidor de API iniciado no Orca em 127.0.0.1:3101; o servidor já existente do
-  dashboard em 3000 foi preservado. Sessão de smoke invalidada após a verificação.
-- Sem commits, merge, push, deploy, novos workers ou mudanças no MVP da branch main.
+- Login, cadastro de produto, edição de estoque e indicadores testados pela
+  interface contra o Neon, sem mocks; persistência confirmada após reiniciar o
+  servidor.
+- Lint, TypeScript e build aprovados.
+- Contrato em `src/shared/contracts/admin.ts` é a fonte única dos tipos de rede.
