@@ -17,8 +17,11 @@ test.beforeEach(async ({ page }) => {
       { id: "two", name: "Cliente Inativo", email: "two@example.test", status: "inactive", createdAt: "2026-01-02T00:00:00.000Z" },
     ];
     else if (path === "/api/admin/products") data = [
-      { id: "kit", name: "Kit Urban", sku: "KIT-001", priceCents: 8990, active: true, createdAt: "2026-01-01T00:00:00.000Z" },
-      { id: "mug", name: "Caneca", sku: "MUG-001", priceCents: 3500, active: true, createdAt: "2026-01-01T00:00:00.000Z" },
+      { id: "kit", slug: "kit-urban", name: "Kit Urban", sku: "KIT-001", description: "Kit demonstrativo", brand: "Seleção da loja", categorySlug: "kits", categoryName: "Kits", priceCents: 8990, active: true, archived: false, isNew: false, isFeatured: true, tags: [], variants: [], images: [], createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+      { id: "mug", slug: "caneca", name: "Caneca", sku: "MUG-001", description: "", brand: "Seleção da loja", categorySlug: null, categoryName: null, priceCents: 3500, active: true, archived: false, isNew: false, isFeatured: false, tags: [], variants: [], images: [], createdAt: "2026-01-01T00:00:00.000Z", updatedAt: "2026-01-01T00:00:00.000Z" },
+    ];
+    else if (path === "/api/admin/categories") data = [
+      { slug: "kits", name: "Kits", description: "Combinações de acessórios.", image: "/products/kit.webp", productCount: 1, createdAt: "2026-01-01T00:00:00.000Z" },
     ];
     else if (path === "/api/admin/inventory") data = inventory;
     else if (path.startsWith("/api/admin/inventory/") && route.request().method() === "PATCH") {
@@ -98,6 +101,23 @@ test("products table adjusts stock and recovers from simulated error", async ({
   ).toBeVisible();
   await page.getByRole("button", { name: /Tentar novamente/ }).click();
   await expect(page.locator(".admin-table tbody tr").first()).toBeVisible();
+});
+
+test("categorias page lists categories and product edit form opens pre-filled", async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/admin/categorias");
+  await expect(page.locator(".admin-table tbody tr")).toHaveCount(1);
+  await expect(page.locator(".admin-table")).toContainText("Kits");
+
+  await page.goto("/admin/produtos");
+  await expect(page.locator(".admin-table tbody tr").first()).toBeVisible();
+  const row = page.locator(".admin-table tbody tr").filter({ hasText: "Kit Urban" });
+  await row.getByRole("button", { name: "Editar Kit Urban" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("Nome", { exact: true })).toHaveValue("Kit Urban");
+  await expect(dialog.getByLabel("Preço (R$)", { exact: true })).toHaveValue(/89/);
 });
 
 test("admin layout is responsive and its sidebar opens on mobile", async ({
