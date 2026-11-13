@@ -1,31 +1,36 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { products, getProduct } from "@/data/products";
+import { getStorefrontProducts } from "@/lib/storefront";
 import { Container } from "@/components/layout/Container";
 import { ProductDetails } from "@/components/commerce/ProductDetails";
 import { ProductGrid } from "@/components/commerce/ProductGrid";
 import { SectionHeading } from "@/components/ui/SectionHeading";
-export function generateStaticParams() {
-  return products.map((p) => ({ slug: p.slug }));
-}
+
+export const dynamic = "force-dynamic";
+
 export async function generateMetadata({
   params,
 }: {
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
-  const product = getProduct((await params).slug);
+  const slug = (await params).slug;
+  const products = await getStorefrontProducts();
+  const product = products.find((p) => p.slug === slug);
   return {
     title: product?.name ?? "Produto não encontrado",
     description: product?.description,
   };
 }
+
 export default async function ProductPage({
   params,
 }: {
   params: Promise<{ slug: string }>;
 }) {
-  const product = getProduct((await params).slug);
+  const slug = (await params).slug;
+  const products = await getStorefrontProducts();
+  const product = products.find((p) => p.slug === slug);
   if (!product) notFound();
   const related = products
     .filter((p) => p.id !== product.id)

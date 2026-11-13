@@ -3,13 +3,14 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowUpRight, Heart, UserRound } from "lucide-react";
 import { navigation } from "@/data/navigation";
-import { categories } from "@/data/categories";
+import { useCatalog } from "@/store/catalog-store";
 import { useCart } from "@/store/cart-store";
 import { Modal } from "@/components/ui/Modal";
 export function MobileMenu() {
   const pathname = usePathname();
   const overlay = useCart((s) => s.overlay);
   const close = useCart((s) => s.setOverlay);
+  const categories = useCatalog((s) => s.categories);
   return (
     <Modal
       open={overlay === "menu"}

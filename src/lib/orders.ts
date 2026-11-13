@@ -1,4 +1,4 @@
-import { findProduct } from "@/data/products";
+import { findProduct } from "@/store/catalog-store";
 import type { CustomerOrder } from "@/types/account";
 
 export const orderSubtotal = (order: CustomerOrder) =>

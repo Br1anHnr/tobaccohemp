@@ -3,6 +3,9 @@ import { useEffect, type ReactNode } from "react";
 import { MotionConfig } from "motion/react";
 import { useCart } from "@/store/cart-store";
 import { useAccount } from "@/store/account-store";
+import { useCatalog } from "@/store/catalog-store";
+import type { Product } from "@/types/product";
+import type { Category } from "@/types/category";
 import { CartDrawer } from "@/components/commerce/CartDrawer";
 import { SearchOverlay } from "@/components/search/SearchOverlay";
 import { AgeGate } from "@/components/age/AgeGate";
@@ -54,16 +57,27 @@ function AccountPreview() {
     </Modal>
   );
 }
-export function Providers({ children }: { children: ReactNode }) {
+export function Providers({
+  children,
+  products,
+  categories,
+}: {
+  children: ReactNode;
+  products: Product[];
+  categories: Category[];
+}) {
   const storageError = useCart((s) => s.storageError);
   useEffect(() => {
+    // Seed the runtime catalog before rehydrating the cart, whose `merge`
+    // validates persisted items against the product list.
+    useCatalog.getState().setCatalog(products, categories);
     Promise.resolve(useCart.persist.rehydrate()).finally(() =>
       useCart.setState({ hydrated: true }),
     );
     Promise.resolve(useAccount.persist.rehydrate()).finally(() =>
       useAccount.setState({ hydrated: true }),
     );
-  }, []);
+  }, [products, categories]);
   return (
     <MotionConfig reducedMotion="user">
       {children}

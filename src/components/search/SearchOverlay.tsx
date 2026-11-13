@@ -4,7 +4,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { Search, ArrowUpRight, X } from "lucide-react";
-import { products } from "@/data/products";
+import { useCatalog } from "@/store/catalog-store";
 import { normalize } from "@/lib/utils";
 import { currency } from "@/lib/currency";
 import { useCart } from "@/store/cart-store";
@@ -14,6 +14,7 @@ export function SearchOverlay() {
   const router = useRouter();
   const overlay = useCart((s) => s.overlay);
   const open = useCart((s) => s.setOverlay);
+  const products = useCatalog((s) => s.products);
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);

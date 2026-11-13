@@ -1,7 +1,7 @@
 "use client";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import { findProduct } from "@/data/products";
+import { findProduct } from "@/store/catalog-store";
 import { STORAGE } from "@/lib/constants";
 import { itemKey } from "@/lib/utils";
 import type { CartItem } from "@/types/cart";

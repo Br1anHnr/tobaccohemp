@@ -3,9 +3,10 @@ import { ArrowUpRight, Camera as Instagram } from "lucide-react";
 import { Container } from "./Container";
 import { Logo } from "./Logo";
 import { Newsletter } from "./Newsletter";
-import { categories } from "@/data/categories";
+import { getStorefrontCategories } from "@/lib/storefront";
 import { STORE } from "@/lib/constants";
-export function Footer() {
+export async function Footer() {
+  const categories = await getStorefrontCategories();
   return (
     <footer className="footer">
       <Container>
