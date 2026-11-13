@@ -72,6 +72,40 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS customer_password_resets_account_idx ON customer_password_resets (account_id);
     `,
   },
+  {
+    id: "003_catalog",
+    sql: `
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS slug TEXT NOT NULL DEFAULT '';
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS description TEXT NOT NULL DEFAULT '';
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS brand TEXT NOT NULL DEFAULT 'Seleção da loja';
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS category_slug TEXT;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS is_new BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS is_featured BOOLEAN NOT NULL DEFAULT false;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}';
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS variants TEXT[] NOT NULL DEFAULT '{}';
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS archived_at TIMESTAMPTZ;
+      ALTER TABLE products ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ;
+      CREATE UNIQUE INDEX IF NOT EXISTS products_slug_lower_idx ON products (lower(slug)) WHERE slug <> '';
+
+      CREATE TABLE IF NOT EXISTS categories (
+        slug TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        image TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMPTZ NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS product_images (
+        id TEXT PRIMARY KEY,
+        product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
+        url TEXT NOT NULL,
+        alt TEXT NOT NULL DEFAULT '',
+        position INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS product_images_product_idx ON product_images (product_id, position);
+    `,
+  },
 ];
 
 let running: Promise<void> | undefined;

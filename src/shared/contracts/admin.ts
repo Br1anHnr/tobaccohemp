@@ -9,15 +9,63 @@ export interface Customer {
 }
 export type CustomerInput = Pick<Customer, "name" | "email" | "status">;
 
+export interface ProductImage {
+  id: string;
+  url: string;
+  alt: string;
+  position: number;
+}
+
 export interface Product {
   id: string;
+  slug: string;
   sku: string;
   name: string;
+  description: string;
+  brand: string;
+  categorySlug: string | null;
+  categoryName: string | null;
   priceCents: number;
   active: boolean;
+  archived: boolean;
+  isNew: boolean;
+  isFeatured: boolean;
+  tags: string[];
+  variants: string[];
+  images: ProductImage[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Scalars accepted on create/update. `archived` drives soft-delete (archive). */
+export type ProductInput = Partial<
+  Pick<
+    Product,
+    | "slug"
+    | "sku"
+    | "name"
+    | "description"
+    | "brand"
+    | "categorySlug"
+    | "priceCents"
+    | "active"
+    | "archived"
+    | "isNew"
+    | "isFeatured"
+    | "tags"
+    | "variants"
+  >
+>;
+
+export interface Category {
+  slug: string;
+  name: string;
+  description: string;
+  image: string;
+  productCount: number;
   createdAt: string;
 }
-export type ProductInput = Pick<Product, "sku" | "name" | "priceCents" | "active">;
+export type CategoryInput = Pick<Category, "slug" | "name" | "description" | "image">;
 
 export interface InventoryItem {
   productId: string;
@@ -57,6 +105,7 @@ export const adminEndpoints = {
   session: "/api/admin/auth/session",
   customers: "/api/admin/customers",
   products: "/api/admin/products",
+  categories: "/api/admin/categories",
   inventory: "/api/admin/inventory",
   dashboard: "/api/admin/dashboard",
 } as const;
