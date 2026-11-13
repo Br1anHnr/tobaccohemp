@@ -782,6 +782,153 @@ table.admin-table {
   animation: overlay-in 0.2s;
 }
 
+/* Formulário ampliado de produto/categoria ----------------------------- */
+.form-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.form-field textarea {
+  width: 100%;
+  background: #171716;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--foreground);
+  padding: 12px 14px;
+  min-height: 46px;
+  resize: vertical;
+  font: inherit;
+}
+
+.form-field .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  line-height: 1.4;
+}
+
+.row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.row-actions .icon-button {
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--border);
+  background: transparent;
+  border-radius: 4px;
+  color: var(--foreground);
+  display: grid;
+  place-items: center;
+}
+
+.row-actions .icon-button:hover:not(:disabled) {
+  border-color: var(--brand-yellow);
+  background: #ffffff0a;
+}
+
+/* Gerenciamento de imagens do produto ----------------------------------- */
+.image-manager {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.image-manager legend {
+  padding: 0 6px;
+  font-size: 12px;
+  color: var(--foreground);
+}
+
+.image-manager__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 10px;
+}
+
+.image-slot {
+  position: relative;
+  aspect-ratio: 1;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0e0e0d;
+  display: grid;
+  place-items: center;
+}
+
+.image-slot img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.image-slot.is-main {
+  border-color: var(--brand-yellow);
+}
+
+.image-slot__badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #0a0a09;
+  background: var(--brand-yellow);
+  border-radius: 999px;
+  padding: 3px 7px;
+}
+
+.image-slot__actions {
+  position: absolute;
+  inset: auto 0 0 0;
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px;
+  background: #000c;
+}
+
+.image-slot__actions button,
+.image-slot__replace {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #44403a;
+  background: #141312;
+  border-radius: 5px;
+  color: var(--foreground);
+}
+
+.image-slot__replace input {
+  display: none;
+}
+
+.image-slot--add {
+  border-style: dashed;
+  color: var(--muted);
+  cursor: pointer;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.badge-status--arquivado {
+  color: #a6a59f;
+  background: #1c1c1b;
+  border-color: #3a3a37;
+}
+
 /* Responsivo ----------------------------------------------------------- */
 @media (max-width: 1023px) {
   .admin-shell {
