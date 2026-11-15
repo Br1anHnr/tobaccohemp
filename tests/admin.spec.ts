@@ -8,6 +8,126 @@ test.beforeEach(async ({ page }) => {
     { productId: "kit", quantity: 4, reorderPoint: 5, updatedAt: "2026-01-01T00:00:00.000Z" },
     { productId: "mug", quantity: 0, reorderPoint: 2, updatedAt: "2026-01-01T00:00:00.000Z" },
   ];
+  const orders = [
+    {
+      id: "ord-1",
+      orderNumber: "TH-DEMO1001",
+      customerAccountId: null,
+      customerLabel: "Cliente Sandbox 1",
+      status: "pending_payment",
+      channel: "site",
+      paymentProvider: "demo",
+      paymentMethod: "pix",
+      providerReference: "DEMO-TH-DEMO1001-AAA111",
+      checkoutUrl: null,
+      subtotalCents: 8990,
+      shippingCents: 0,
+      discountCents: 0,
+      totalCents: 8990,
+      currency: "BRL",
+      isDemo: true,
+      eligibilityStatus: "eligible_demo",
+      expiresAt: "2026-12-01T00:30:00.000Z",
+      createdAt: "2026-11-15T12:00:00.000Z",
+      updatedAt: "2026-11-15T12:00:00.000Z",
+      items: [
+        {
+          id: "item-1",
+          orderId: "ord-1",
+          productId: "kit",
+          sku: "KIT-001",
+          productName: "Kit Urban",
+          categorySlug: "kits",
+          variant: "Preto",
+          quantity: 1,
+          unitPriceCents: 8990,
+          lineTotalCents: 8990,
+          eligible: true,
+        },
+      ],
+      history: [
+        {
+          id: "hist-1",
+          orderId: "ord-1",
+          fromStatus: null,
+          toStatus: "draft",
+          reason: "Pedido demonstrativo criado com preços congelados.",
+          actorType: "admin",
+          actorId: "local-admin",
+          createdAt: "2026-11-15T12:00:00.000Z",
+        },
+        {
+          id: "hist-2",
+          orderId: "ord-1",
+          fromStatus: "draft",
+          toStatus: "pending_payment",
+          reason: "Simulação de Pix demonstrativo.",
+          actorType: "system",
+          actorId: "demo",
+          createdAt: "2026-11-15T12:00:01.000Z",
+        },
+      ],
+    },
+    {
+      id: "ord-2",
+      orderNumber: "TH-DEMO1002",
+      customerAccountId: null,
+      customerLabel: "Atendimento WhatsApp Demo",
+      status: "paid",
+      channel: "whatsapp_link",
+      paymentProvider: "demo",
+      paymentMethod: "pix",
+      providerReference: "DEMO-TH-DEMO1002-BBB222",
+      checkoutUrl: null,
+      subtotalCents: 3500,
+      shippingCents: 0,
+      discountCents: 0,
+      totalCents: 3500,
+      currency: "BRL",
+      isDemo: true,
+      eligibilityStatus: "eligible_demo",
+      expiresAt: "2026-12-01T00:30:00.000Z",
+      createdAt: "2026-11-14T10:00:00.000Z",
+      updatedAt: "2026-11-14T10:15:00.000Z",
+      items: [
+        {
+          id: "item-2",
+          orderId: "ord-2",
+          productId: "mug",
+          sku: "MUG-001",
+          productName: "Caneca",
+          categorySlug: "acessorios",
+          variant: "",
+          quantity: 1,
+          unitPriceCents: 3500,
+          lineTotalCents: 3500,
+          eligible: true,
+        },
+      ],
+      history: [
+        {
+          id: "hist-3",
+          orderId: "ord-2",
+          fromStatus: null,
+          toStatus: "draft",
+          reason: "Pedido demonstrativo criado com preços congelados.",
+          actorType: "admin",
+          actorId: "local-admin",
+          createdAt: "2026-11-14T10:00:00.000Z",
+        },
+        {
+          id: "hist-4",
+          orderId: "ord-2",
+          fromStatus: "pending_payment",
+          toStatus: "paid",
+          reason: "Confirmação simulada em sandbox.",
+          actorType: "admin",
+          actorId: "local-admin",
+          createdAt: "2026-11-14T10:15:00.000Z",
+        },
+      ],
+    },
+  ];
   await page.route("**/api/admin/**", async route => {
     const path = new URL(route.request().url()).pathname;
     let data: unknown;
@@ -25,6 +145,63 @@ test.beforeEach(async ({ page }) => {
       const item = inventory.find(row => row.productId === path.split("/").at(-1));
       Object.assign(item ?? {}, route.request().postDataJSON());
       data = item;
+    } else if (path === "/api/admin/orders" && route.request().method() === "GET") {
+      data = orders.map((order) => {
+        const summary = { ...order } as Record<string, unknown>;
+        delete summary.items;
+        delete summary.history;
+        return summary;
+      });
+    } else if (path === "/api/admin/orders" && route.request().method() === "POST") {
+      const body = route.request().postDataJSON() as { customerLabel?: string; channel: "site" | "whatsapp_link"; paymentMethod: "pix" | "card" | "demo"; items: Array<{ productId: string; quantity: number }> };
+      const created = {
+        id: `ord-${orders.length + 1}`,
+        orderNumber: "TH-DEMO1003",
+        customerAccountId: null,
+        customerLabel: body.customerLabel || "Pedido demonstrativo",
+        status: "pending_payment" as const,
+        channel: body.channel,
+        paymentProvider: "demo" as const,
+        paymentMethod: body.paymentMethod,
+        providerReference: "DEMO-TH-DEMO1003-CCC333",
+        checkoutUrl: null,
+        subtotalCents: 8990 * (body.items[0]?.quantity ?? 1),
+        shippingCents: 0,
+        discountCents: 0,
+        totalCents: 8990 * (body.items[0]?.quantity ?? 1),
+        currency: "BRL" as const,
+        isDemo: true,
+        eligibilityStatus: "eligible_demo" as const,
+        expiresAt: "2026-12-01T00:30:00.000Z",
+        createdAt: "2026-11-15T14:00:00.000Z",
+        updatedAt: "2026-11-15T14:00:00.000Z",
+        items: [{ id: "item-3", orderId: `ord-${orders.length + 1}`, productId: "kit", sku: "KIT-001", productName: "Kit Urban", categorySlug: "kits", variant: "", quantity: body.items[0]?.quantity ?? 1, unitPriceCents: 8990, lineTotalCents: 8990 * (body.items[0]?.quantity ?? 1), eligible: true }],
+        history: [{ id: "hist-5", orderId: `ord-${orders.length + 1}`, fromStatus: "draft" as const, toStatus: "pending_payment" as const, reason: "Simulação de Pix demonstrativo.", actorType: "system" as const, actorId: "demo", createdAt: "2026-11-15T14:00:00.000Z" }],
+      };
+      orders.unshift(created);
+      return route.fulfill({ status: 201, json: { data: created }, headers: { "Cache-Control": "no-store" } });
+    } else if (path.startsWith("/api/admin/orders/") && route.request().method() === "GET") {
+      const order = orders.find(row => row.id === path.split("/").at(-1));
+      if (!order) return route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND", message: "Registro não encontrado." } } });
+      data = order;
+    } else if (path.startsWith("/api/admin/orders/") && route.request().method() === "PATCH") {
+      const order = orders.find(row => row.id === path.split("/").at(-1));
+      if (!order) return route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND", message: "Registro não encontrado." } } });
+      const body = route.request().postDataJSON() as { status: string; reason?: string };
+      const prev = order.status;
+      order.status = body.status as typeof order.status;
+      order.updatedAt = "2026-11-15T15:00:00.000Z";
+      order.history.push({
+        id: `hist-${order.history.length + 10}`,
+        orderId: order.id,
+        fromStatus: prev,
+        toStatus: order.status,
+        reason: body.reason || "Atualizado no painel.",
+        actorType: "admin",
+        actorId: "local-admin",
+        createdAt: "2026-11-15T15:00:00.000Z",
+      });
+      data = order;
     } else if (path === "/api/admin/dashboard") data = { customers: 2, products: 2, units: 4, lowStockProducts: 2, stockValueCents: 35960 };
     else return route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND", message: "Fixture não disponível." } } });
     return route.fulfill({ json: { data }, headers: { "Cache-Control": "no-store" } });
@@ -130,8 +307,49 @@ test("admin pages pass basic accessibility checks", async ({ page }) => {
   expect(results.violations).toEqual([]);
 });
 
+test("orders page filters, inspects detail history, transitions status and creates demo order", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/admin/pedidos");
+  await expect(page.getByRole("heading", { name: /Pedidos/ })).toBeVisible();
+  await expect(page.locator(".kpi-card")).toHaveCount(4);
+  await expect(page.locator(".admin-table tbody tr")).toHaveCount(2);
+
+  await page.getByLabel("Status").selectOption("paid");
+  await expect(page.locator(".admin-table tbody tr")).toHaveCount(1);
+  await page.getByLabel("Status").selectOption("all");
+  await expect(page.locator(".admin-table tbody tr")).toHaveCount(2);
+
+  await page.getByRole("button", { name: "Ver detalhes do pedido TH-DEMO1001" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toContainText("Kit Urban");
+  await expect(dialog).toContainText("Histórico de transições");
+  await dialog.getByLabel("Motivo da alteração (opcional)").fill("Pagamento sandbox aprovado");
+  await dialog.getByRole("button", { name: "Marcar como Pago" }).click();
+  await expect(dialog).toContainText("Pagamento sandbox aprovado");
+  await dialog.getByRole("button", { name: "Fechar" }).click();
+  await expect(dialog).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Novo pedido demo" }).click();
+  const createDialog = page.getByRole("dialog");
+  await createDialog.getByLabel("Identificação do pedido (opcional)").fill("Pedido Novo E2E");
+  await createDialog.getByRole("button", { name: "Criar pedido demo" }).click();
+  await expect(page.locator(".admin-table tbody tr")).toHaveCount(3);
+  await expect(page.locator(".admin-table")).toContainText("TH-DEMO1003");
+
+  expect(
+    await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1),
+  ).toBeTruthy();
+
+  const a11y = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+    .analyze();
+  expect(a11y.violations).toEqual([]);
+});
+
 test("production build keeps the administrative proxy disabled", async ({ request }) => {
   expect((await request.get("/api/admin/auth/session")).status()).toBe(503);
   expect((await request.get("/api/admin/customers")).status()).toBe(503);
+  expect((await request.get("/api/admin/orders")).status()).toBe(503);
   expect((await request.post("/api/admin/auth/login", { data: {} })).status()).toBe(503);
 });
