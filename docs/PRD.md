@@ -1,7 +1,7 @@
 # PRD — Tobacco Hemp
 
-**Versão:** 1.3 — Integração das branches e validação local  
-**Data:** 12/11/2026  
+**Versão:** 1.4 — Módulo de catálogo (CRUD, categorias, imagens e vitrine dinâmica)  
+**Data:** 15/11/2026  
 **Status:** documento de trabalho; decisões de checkout e integração comercial pendentes de homologação  
 **Base:** plano técnico de 09/11/2026, PRD v1.0–v1.2 e integração/validação local das branches (12/11/2026).
 
@@ -38,10 +38,10 @@ Construir uma plataforma digital independente para a **Tobacco Hemp**, com vitri
 | TH-04 | Banco PostgreSQL Neon, migrations e seed do catálogo | [x] | `feature/backend-neon`, persistência validada localmente |
 | TH-05 | Dashboard administrativo com produtos, estoque, clientes e métricas | [x] | API própria, testes com Neon e 44/44 E2E locais; não habilitado publicamente |
 | TH-06 | Adicionar produtos pelo painel | [x] | `POST /api/admin/products` + `ProductForm` (nome, SKU, preço); testado em `tests/integration/admin.spec.ts` |
-| TH-07 | Editar nome, preço, descrições, categorias e imagens pelo painel | [~] | `PATCH /api/admin/products/[id]` existe (nome, preço, SKU, ativo), mas **sem UI de edição**; descrição, categoria e imagens inexistem no schema/input |
-| TH-08 | Remover/desativar produto, com histórico preservado | [ ] | **Sem rota DELETE, sem soft delete e sem UI de arquivar/desativar**; campo `active` existe mas não é usado na interface |
-| TH-09 | Upload e gerenciamento de imagens de produtos | [ ] | Nenhum campo de imagem no schema (`migrate.ts`) nem no `ProductInput`; object storage ainda não escolhido |
-| TH-10 | Catálogo público refletir CRUD do Neon | [~] | `Catalog.tsx` ainda lê `src/data/products.ts` (estático); `seed.ts` popula o Neon, mas a vitrine não lê o banco |
+| TH-07 | Editar nome, preço, descrições, categorias e imagens pelo painel | [x] | `ProductForm` com edição completa (nome, SKU, preço, descrição, categoria, coleção, slug, estoque, disponibilidade, destaque, novidade); `PATCH /api/admin/products/[id]` aceita todos os campos; E2E valida formulário de edição pré-preenchido (`tests/admin.spec.ts`) |
+| TH-08 | Remover/desativar produto, com histórico preservado | [x] | `DELETE /api/admin/products/[id]` faz soft delete (`archived_at`); UI com Arquivar/Desarquivar; vitrine filtra `archived_at IS NULL`; validação ponta a ponta pendente contra o Neon |
+| TH-09 | Upload e gerenciamento de imagens de produtos | [~] | Tabela `product_images` + rotas de upload/reordenação/substituição/remoção e UI de múltiplas imagens; armazenamento local em `public/uploads` (pendente: storage persistente/object storage) |
+| TH-10 | Catálogo público refletir CRUD do Neon | [x] | `src/lib/storefront.ts` lê produtos/categorias do Neon com fallback estático; `src/store/catalog-store.ts` hidrata o client; busca, filtros, carrinho e favoritos preservados (52/52 E2E); caminho Neon validado apenas no teste de integração pendente |
 | TH-11 | Login administrativo seguro e sessões prontas para Preview/produção | [ ] | Sessão httpOnly/SameSite=Strict testada; `admin-http.ts` ainda bloqueia com `503` fora de dev/test |
 | TH-12 | Cadastro, login, recuperação e perfil reais do cliente | [x] | `feature/customer-auth` (`0d09758`) integrado; `AUTH.enabled=true`; fluxo completo validado contra Neon (6/6 integração, desktop+mobile) |
 | TH-13 | WhatsApp como canal de atendimento geral | [x] | Canal já usado pelo negócio, **sem afirmar integração técnica ao site** |
@@ -173,8 +173,8 @@ Outras exigências: proteção de dados (LGPD), sessões administrativas persist
 
 ## 9. Decisões pendentes (checklist de gestão)
 
-- [ ] Escolher storage de imagens: capacidade, custo, upload seguro, CDN, backup.
-- [ ] Validar cadastro/edição de produtos no painel até a vitrine, incluindo exclusão lógica.
+- [ ] Executar o teste de integração real contra o Neon (`tests/integration/catalog.spec.ts`: cadastro → upload de imagem → edição de preço → reflexo na vitrine → arquivamento). Ainda não executado por ausência de `DATABASE_URL` no ambiente local.
+- [ ] Escolher storage persistente de imagens (capacidade, custo, upload seguro, CDN, backup). Hoje `public/uploads` é apenas local e não persiste em deploy serverless.
 - [ ] Confirmar acesso ao checkout API na conta PagBank associada à maquininha e consultar taxas/elegibilidade.
 - [ ] Obter proposta equivalente do Asaas e testar checkout Pix/cartão em sandbox.
 - [ ] Determinar quais SKUs reais podem ser exibidos, divulgados e transacionados em cada canal.
@@ -201,3 +201,5 @@ Outras exigências: proteção de dados (LGPD), sessões administrativas persist
 **Controle de alteração v1.2:** coluna de evidência da tabela de status atualizada com base em inspeção direta do código e dos testes (TH-06 a TH-14); sem alteração de decisões de negócio. Confirmadas as lacunas: CRUD restrito a nome/SKU/preço/ativo (sem descrição, categoria, imagens, exclusão lógica ou UI de edição), catálogo público ainda estático, checkout PagBank/Asaas não iniciado e Evolution API não implementada.
 
 **Controle de alteração v1.3:** branches `feature/customer-auth` (`0d09758`), `feature/storefront-polish` (`571aa48`) e `docs/prd-tobacco` (`b6a20f5`) integradas em `feature/integracao-v2` via cherry-pick, sem conflitos. Validação local executada: lint, typecheck e build aprovados; 50 testes E2E (desktop+mobile) e 6 testes de integração contra o Neon (login/cadastro/sessão/perfil de cliente, dashboard administrativo, catálogo e carrinho; migrations `001_init` e `002_customer_auth` idempotentes) aprovados. Status TH-03, TH-12 e TH-21 atualizados para `[x]`. Nenhuma operação destrutiva executada no Neon; nenhum push, deploy ou merge em `main` realizado.
+
+**Controle de alteração v1.4:** branch `feature/catalogo-dinamico` implementa o módulo completo de gestão de catálogo. CRUD de produtos (nome, SKU, preço, descrição, categoria, coleção, slug, estoque, disponibilidade, destaque e novidade), exclusão lógica (soft delete) e múltiplas imagens com upload local, além da gestão de categorias com tratamento de categorias vazias. O catálogo público passa a ler o Neon (`src/lib/storefront.ts`) com fallback estático, preservando busca, filtros, carrinho e favoritos. Validação local: lint, typecheck e build aprovados; 52/52 testes E2E (desktop+mobile) aprovados. Status TH-07, TH-08 e TH-10 atualizados para `[x]`; TH-09 em `[~]`. Pendências: executar o teste de integração real contra o Neon e definir storage persistente de imagens (`public/uploads` é apenas local). Nenhum push, deploy ou merge realizado.
