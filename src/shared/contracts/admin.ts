@@ -58,5 +58,6 @@ export const adminEndpoints = {
   customers: "/api/admin/customers",
   products: "/api/admin/products",
   inventory: "/api/admin/inventory",
+  orders: "/api/admin/orders",
   dashboard: "/api/admin/dashboard",
 } as const;
