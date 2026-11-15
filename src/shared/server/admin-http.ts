@@ -5,13 +5,27 @@ import { AdminError } from "./validation";
 
 export type AdminHandler = (request: NextRequest) => unknown | Promise<unknown>;
 
+const developmentEnvs = new Set(["development", "test"]);
+
+/** True when the admin backend runs outside local development/test. */
+export function isAdminProduction(): boolean {
+  return !developmentEnvs.has(process.env.NODE_ENV ?? "");
+}
+
+/** Session cookies must be Secure over HTTPS (the only protocol used in production). */
+export function isSecureRequest(request: NextRequest): boolean {
+  const forwarded = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  return request.nextUrl.protocol === "https:" || forwarded === "https";
+}
+
 export function adminRoute(handler: AdminHandler, options: { public?: boolean; status?: number } = {}) {
   return async (request: NextRequest) => {
     try {
-      if (!["development", "test"].includes(process.env.NODE_ENV ?? "")) {
-        throw new AdminError(503, "UNAVAILABLE", "Backend administrativo disponível apenas em desenvolvimento local.");
+      // The 503 lock stays by default outside development/test. It is released
+      // only by an explicit deploy-time opt-in, never unconditionally.
+      if (isAdminProduction() && process.env.ADMIN_ENABLED !== "1") {
+        throw new AdminError(503, "UNAVAILABLE", "Backend administrativo desabilitado em produção. Defina ADMIN_ENABLED=1 para habilitar.");
       }
-      if (!options.public) authorize(sessionUser(request.cookies.get(sessionCookie)?.value));
       if (!["GET", "HEAD"].includes(request.method)) {
         // Do not trust forwarded-host headers supplied by callers.
         const origin = request.headers.get("origin");
@@ -22,6 +36,7 @@ export function adminRoute(handler: AdminHandler, options: { public?: boolean; s
         }
       }
       await ensureSchema();
+      if (!options.public) authorize(await sessionUser(request.cookies.get(sessionCookie)?.value));
       const data = await handler(request);
       const response = data instanceof NextResponse ? data : NextResponse.json({ data }, { status: options.status ?? 200 });
       response.headers.set("Cache-Control", "no-store");

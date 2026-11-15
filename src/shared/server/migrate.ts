@@ -72,6 +72,25 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS customer_password_resets_account_idx ON customer_password_resets (account_id);
     `,
   },
+  {
+    id: "003_admin_sessions",
+    sql: `
+      CREATE TABLE IF NOT EXISTS admin_sessions (
+        token_hash TEXT PRIMARY KEY,
+        admin_id TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS admin_sessions_admin_idx ON admin_sessions (admin_id);
+
+      CREATE TABLE IF NOT EXISTS admin_login_attempts (
+        id TEXT PRIMARY KEY,
+        attempted_at TIMESTAMPTZ NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS admin_login_attempts_at_idx ON admin_login_attempts (attempted_at);
+    `,
+  },
 ];
 
 let running: Promise<void> | undefined;
