@@ -1,21 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, unlink, writeFile } from "node:fs/promises";
-import path from "node:path";
 import type { ProductImage } from "@/shared/contracts/admin";
 import { pool, type Db } from "@/shared/server/database";
 import { AdminError, integerInput, invalid, missing, objectInput } from "@/shared/server/validation";
+import { getImageStorage } from "./image-storage";
 import { getProduct } from "./products";
-
-/**
- * Image storage decision (free): files are written to local disk under
- * `public/uploads/products/<productId>/` and only their URLs are stored in
- * PostgreSQL — never binary blobs. This keeps the PRD requirement (object
- * storage, not Postgres binaries) while requiring no external account and
- * working fully offline for local validation. The write path is isolated in
- * `writeImageFile`/`removeImageFile` so it can be swapped for Cloudflare R2
- * (free 10 GB tier, S3-compatible, no egress fees) or Cloudinary later via the
- * same interface, without touching the catalog logic.
- */
 
 const MAX_BYTES = 5 * 1024 * 1024;
 const ALLOWED = new Map<string, string>([
@@ -24,28 +12,21 @@ const ALLOWED = new Map<string, string>([
   ["image/webp", "webp"],
 ]);
 
-function uploadsDir(productId: string): string {
-  return path.join(process.cwd(), "public", "uploads", "products", productId);
+interface PreparedFile {
+  fileName: string;
+  body: Buffer;
+  contentType: string;
 }
 
-async function writeImageFile(productId: string, file: File): Promise<string> {
+async function prepareFile(file: File): Promise<PreparedFile> {
   const ext = ALLOWED.get(file.type);
   if (!ext) throw new AdminError(422, "VALIDATION", "Envie uma imagem JPEG, PNG ou WebP.");
   if (file.size > MAX_BYTES) throw new AdminError(422, "VALIDATION", "A imagem deve ter até 5 MB.");
-  const dir = uploadsDir(productId);
-  await mkdir(dir, { recursive: true });
-  const fileName = `${randomUUID()}.${ext}`;
-  await writeFile(path.join(dir, fileName), Buffer.from(await file.arrayBuffer()));
-  return `/uploads/products/${productId}/${fileName}`;
-}
-
-export async function removeImageFile(url: string): Promise<void> {
-  if (!url.startsWith("/uploads/")) return;
-  try {
-    await unlink(path.join(process.cwd(), "public", url.replace(/^\//, "")));
-  } catch {
-    /* The file may already be gone; the DB row is what matters. */
-  }
+  return {
+    fileName: `${randomUUID()}.${ext}`,
+    body: Buffer.from(await file.arrayBuffer()),
+    contentType: file.type,
+  };
 }
 
 function mapImage(row: Record<string, unknown>): ProductImage {
@@ -72,7 +53,8 @@ export async function listImages(productId: string, db: Db = pool()): Promise<Pr
 
 export async function addImage(productId: string, file: File, alt: string, db: Db = pool()): Promise<ProductImage> {
   await assertProduct(productId, db);
-  const url = await writeImageFile(productId, file);
+  const prepared = await prepareFile(file);
+  const url = await getImageStorage().save(productId, prepared.fileName, prepared.body, prepared.contentType);
   const images = await listImages(productId, db);
   const position = images.reduce((max, image) => Math.max(max, image.position), -1) + 1;
   const id = randomUUID();
@@ -113,7 +95,7 @@ export async function deleteImage(productId: string, imageId: string, db: Db = p
     [imageId, productId],
   );
   if (!result.rows.length) missing();
-  await removeImageFile(String(result.rows[0].url));
+  await getImageStorage().remove(String(result.rows[0].url));
 }
 
 export async function replaceImage(productId: string, imageId: string, file: File, db: Db = pool()): Promise<ProductImage> {
@@ -123,9 +105,10 @@ export async function replaceImage(productId: string, imageId: string, file: Fil
     [imageId, productId],
   );
   if (!current.rows.length) missing();
-  const url = await writeImageFile(productId, file);
+  const prepared = await prepareFile(file);
+  const url = await getImageStorage().save(productId, prepared.fileName, prepared.body, prepared.contentType);
   await db.query("UPDATE product_images SET url = $1 WHERE id = $2", [url, imageId]);
-  await removeImageFile(String(current.rows[0].url));
+  await getImageStorage().remove(String(current.rows[0].url));
   const images = await listImages(productId, db);
   const image = images.find(item => item.id === imageId);
   if (!image) missing();

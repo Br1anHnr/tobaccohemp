@@ -58,7 +58,8 @@ test("cadastro, edição de preço/imagem e reflexo na vitrine", async ({ page }
     });
     expect(uploaded.status()).toBe(201);
     const image = (await uploaded.json()).data;
-    expect(image.url).toMatch(/^\/uploads\/products\//);
+    // Local (development) or R2 (Cloudflare) — both are valid outcomes.
+    expect(image.url).toMatch(/^(\/uploads\/products\/|https:\/\/)/);
 
     // Edição de preço.
     const edited = await page.request.patch(`/api/admin/products/${productId}`, {
