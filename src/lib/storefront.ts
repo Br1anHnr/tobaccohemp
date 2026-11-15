@@ -92,9 +92,12 @@ async function readFromDbUncached(): Promise<{ products: Product[]; categories: 
           image: row.image,
         })),
     };
-  } catch {
-    // Fall back to the static catalog when the database is unavailable (e.g.
-    // the production E2E build without DATABASE_URL).
+  } catch (error) {
+    // A configured database that fails is a real incident, not a reason to
+    // serve stale static data silently. Keep the static fallback for graceful
+    // degradation (and for the DATABASE_URL-less E2E build above), but surface
+    // the failure so it can be observed and alerted on.
+    console.error("[storefront] falha ao ler o catálogo do banco; usando catálogo estático:", error);
     return null;
   }
 }
