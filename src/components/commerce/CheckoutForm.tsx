@@ -1,49 +1,24 @@
 "use client";
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ArrowRight } from "lucide-react";
+import { AlertTriangle, Check, ArrowRight, ShieldCheck } from "lucide-react";
 import { useCart } from "@/store/cart-store";
 import { useOrder } from "@/store/order-store";
-import { STORAGE } from "@/lib/constants";
+import { BRAZIL_STATES, STORAGE } from "@/lib/constants";
 import { findProduct } from "@/data/products";
 import { currency } from "@/lib/currency";
 import {
   checkoutFields,
   validateCheckout,
   createDemoOrder,
+  evaluateCartEligibility,
 } from "@/lib/checkout";
+import { ONLINE_COMMERCE_POLICY } from "@/modules/orders/domain/eligibility";
+import type { OrderChannel, OrderPaymentMethod } from "@/shared/contracts/orders";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Button } from "@/components/ui/Button";
 import { CartSummary } from "./CartSummary";
-const states = [
-  "AC",
-  "AL",
-  "AP",
-  "AM",
-  "BA",
-  "CE",
-  "DF",
-  "ES",
-  "GO",
-  "MA",
-  "MT",
-  "MS",
-  "MG",
-  "PA",
-  "PB",
-  "PR",
-  "PE",
-  "PI",
-  "RJ",
-  "RN",
-  "RS",
-  "RO",
-  "RR",
-  "SC",
-  "SP",
-  "SE",
-  "TO",
-];
+
 export function CheckoutForm() {
   const items = useCart((s) => s.items);
   const hydrated = useCart((s) => s.hydrated);
@@ -51,12 +26,19 @@ export function CheckoutForm() {
   const setOrder = useOrder((s) => s.setOrder);
   const router = useRouter();
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [eligibilityError, setEligibilityError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [channel, setChannel] = useState<OrderChannel>("site");
+  const [paymentMethod, setPaymentMethod] = useState<OrderPaymentMethod>("pix");
   const lock = useRef(false);
   const summary = useRef<HTMLDivElement>(null);
+
   if (!hydrated) return <p role="status">Carregando sua seleção…</p>;
   if (!items.length)
     return <EmptyState title="Escolha seus essenciais primeiro." />;
+
+  const eligibility = evaluateCartEligibility(items);
+
   return (
     <div className="commerce-columns checkout-columns">
       <form
@@ -64,6 +46,13 @@ export function CheckoutForm() {
         onSubmit={(event) => {
           event.preventDefault();
           if (lock.current) return;
+          if (!eligibility.allowed) {
+            setEligibilityError(
+              eligibility.blockedReasons[0] ??
+                "Há itens não elegíveis para pedido online.",
+            );
+            return;
+          }
           const data = new FormData(event.currentTarget);
           const invalid = validateCheckout(data);
           setErrors(invalid);
@@ -73,25 +62,47 @@ export function CheckoutForm() {
           }
           lock.current = true;
           setSubmitting(true);
-          const order = createDemoOrder(items);
-          setOrder(order);
           try {
-            sessionStorage.setItem(STORAGE.order, JSON.stringify(order));
-          } catch {
-            /* In-memory receipt remains available. */
+            const order = createDemoOrder(items, { channel, paymentMethod });
+            setOrder(order);
+            try {
+              sessionStorage.setItem(STORAGE.order, JSON.stringify(order));
+            } catch {
+              /* In-memory receipt remains available. */
+            }
+            clear();
+            router.push("/pedido-confirmado");
+          } catch (cause) {
+            lock.current = false;
+            setSubmitting(false);
+            setEligibilityError(
+              cause instanceof Error
+                ? cause.message
+                : "Não foi possível gerar o pedido demonstrativo.",
+            );
           }
-          clear();
-          router.push("/pedido-confirmado");
         }}
       >
         <div className="demo-note">
-          <Check size={17} />
+          <Check size={17} aria-hidden="true" />
           <p>
             Checkout demonstrativo. Nenhuma cobrança será realizada.
             <br />
-            Use dados fictícios para testar a experiência.
+            Use dados fictícios para testar a experiência. Os dados pessoais do
+            formulário não são salvos.
           </p>
         </div>
+
+        {(!eligibility.allowed || eligibilityError) && (
+          <div className="error-summary" role="alert">
+            <strong>
+              <AlertTriangle size={15} aria-hidden="true" /> Pedido bloqueado por
+              política de elegibilidade
+            </strong>
+            <p>{eligibilityError || eligibility.blockedReasons[0]}</p>
+          </div>
+        )}
+
         {Object.keys(errors).length > 0 && (
           <div
             className="error-summary"
@@ -109,6 +120,7 @@ export function CheckoutForm() {
             </ul>
           </div>
         )}
+
         <fieldset>
           <legend>Seus dados</legend>
           <p className="muted">Campos obrigatórios, exceto complemento.</p>
@@ -159,7 +171,7 @@ export function CheckoutForm() {
                 aria-describedby={errors.state ? "error-state" : undefined}
               >
                 <option value="">Selecione</option>
-                {states.map((state) => (
+                {BRAZIL_STATES.map((state) => (
                   <option key={state}>{state}</option>
                 ))}
               </select>
@@ -171,6 +183,101 @@ export function CheckoutForm() {
             </label>
           </div>
         </fieldset>
+
+        <fieldset className="checkout-payment-section">
+          <legend>Canal e pagamento (simulação)</legend>
+          <p className="muted">
+            Arquitetura desacoplada de gateway (PagBank/Asaas não conectados).{" "}
+            {ONLINE_COMMERCE_POLICY.notice}
+          </p>
+
+          <div className="checkout-choice-group">
+            <span className="checkout-choice-label">Canal de conclusão</span>
+            <div className="checkout-choice-grid">
+              <label className="checkout-choice" htmlFor="channel-site">
+                <input
+                  id="channel-site"
+                  type="radio"
+                  name="channel"
+                  value="site"
+                  checked={channel === "site"}
+                  onChange={() => setChannel("site")}
+                />
+                <span>
+                  <strong>Checkout no site (demonstração)</strong>
+                  <small>
+                    Fluxo principal no site, sem exigir troca de canal para o
+                    WhatsApp.
+                  </small>
+                </span>
+              </label>
+              <label className="checkout-choice" htmlFor="channel-whatsapp">
+                <input
+                  id="channel-whatsapp"
+                  type="radio"
+                  name="channel"
+                  value="whatsapp_link"
+                  checked={channel === "whatsapp_link"}
+                  onChange={() => setChannel("whatsapp_link")}
+                />
+                <span>
+                  <strong>Continuar no WhatsApp (link Pix simulado)</strong>
+                  <small>
+                    Opção paralela de atendimento; gera prévia fictícia sem envio
+                    real.
+                  </small>
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <div className="checkout-choice-group">
+            <span className="checkout-choice-label">
+              Forma de pagamento demonstrativa
+            </span>
+            <div className="checkout-choice-grid">
+              <label className="checkout-choice" htmlFor="method-pix">
+                <input
+                  id="method-pix"
+                  type="radio"
+                  name="paymentMethod"
+                  value="pix"
+                  checked={paymentMethod === "pix"}
+                  onChange={() => setPaymentMethod("pix")}
+                />
+                <span>
+                  <strong>Pix (simulação)</strong>
+                  <small>
+                    Gera código Pix Copia e Cola fictício, sem valor financeiro.
+                  </small>
+                </span>
+              </label>
+              <label className="checkout-choice" htmlFor="method-card">
+                <input
+                  id="method-card"
+                  type="radio"
+                  name="paymentMethod"
+                  value="card"
+                  checked={paymentMethod === "card"}
+                  onChange={() => setPaymentMethod("card")}
+                />
+                <span>
+                  <strong>Cartão (checkout hospedado simulado)</strong>
+                  <small>
+                    Nenhum número de cartão ou CVV é coletado na aplicação.
+                  </small>
+                </span>
+              </label>
+            </div>
+          </div>
+
+          <p className="checkout-provider-note">
+            <ShieldCheck size={15} aria-hidden="true" />
+            Provedor ativo: <strong>Demo / Sandbox</strong> (desacoplado de
+            cobrança real).
+          </p>
+        </fieldset>
+
         <label className="checkbox-label demo-checkbox">
           <input
             id="checkout-demo"
@@ -187,7 +294,11 @@ export function CheckoutForm() {
             {errors.demo}
           </p>
         )}
-        <Button type="submit" disabled={submitting} className="checkout-submit">
+        <Button
+          type="submit"
+          disabled={submitting || !eligibility.allowed}
+          className="checkout-submit"
+        >
           {submitting ? "Finalizando…" : "Finalizar pedido"}
           <ArrowRight size={18} />
         </Button>
@@ -196,7 +307,8 @@ export function CheckoutForm() {
         <h2>Sua seleção</h2>
         <div className="checkout-items">
           {items.map((item) => {
-            const p = findProduct(item.productId)!;
+            const p = findProduct(item.productId);
+            if (!p) return null;
             return (
               <p key={`${item.productId}:${item.variant}`}>
                 <span>

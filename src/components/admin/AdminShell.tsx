@@ -11,6 +11,7 @@ const sectionFor = (pathname: string) => {
   if (pathname === "/admin") return "Visão geral";
   if (pathname.startsWith("/admin/clientes")) return "Clientes";
   if (pathname.startsWith("/admin/produtos")) return "Produtos & estoque";
+  if (pathname.startsWith("/admin/pedidos")) return "Pedidos";
   return "Painel administrativo";
 };
 

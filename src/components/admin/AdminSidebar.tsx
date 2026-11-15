@@ -52,11 +52,16 @@ export function AdminSidebar({
         ))}
 
         <p className="admin-nav__group">Comercial</p>
-        <span className="admin-nav__link is-disabled" aria-disabled="true">
+        <Link
+          href="/admin/pedidos"
+          className="admin-nav__link"
+          aria-current={pathname.startsWith("/admin/pedidos") ? "page" : undefined}
+          onClick={onClose}
+        >
           <ShoppingCart size={18} aria-hidden="true" />
           Pedidos
-          <span className="admin-nav__badge">Em breve</span>
-        </span>
+          <span className="admin-nav__badge">Demo</span>
+        </Link>
       </nav>
 
       <div className="admin-sidebar__footer">
