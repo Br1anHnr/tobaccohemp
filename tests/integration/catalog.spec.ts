@@ -1,8 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
 import { Pool } from "pg";
 
-// Full catalog flow against the real Neon backend: create → upload image →
-// edit price → reflect on the storefront → archive → hide. Nothing is mocked.
+// Full catalog flow against the real Neon + Cloudflare R2 backend:
+// create → upload image → public read → edit price → reflect on the storefront
+// → replace image → remove image → archive → hide. Nothing is mocked.
 const ORIGIN = "http://127.0.0.1:3210";
 const password = process.env.ADMIN_PASSWORD ?? "synthetic-integration-password";
 
@@ -11,6 +12,8 @@ const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
   "base64",
 );
+// Distinct bytes used for the replace step (still served as image/png).
+const PNG_ALT = Buffer.from("tobacco-hemp-replaced-image-fixture");
 
 async function login(page: Page) {
   const response = await page.request.post("/api/admin/auth/login", {
@@ -25,14 +28,15 @@ async function deleteProduct(id: string) {
   if (!url || !id) return;
   const pool = new Pool({ connectionString: url, max: 1 });
   try {
-    // product_images and inventory are removed by FK cascade.
+    // product_images and inventory are removed by FK cascade. The R2 objects
+    // are removed by the image DELETE route during the test body itself.
     await pool.query("DELETE FROM products WHERE id = $1", [id]);
   } finally {
     await pool.end();
   }
 }
 
-test("cadastro, edição de preço/imagem e reflexo na vitrine", async ({ page }, info) => {
+test("cadastro, ciclo de imagem (upload/leitura/atualização/remoção) e reflexo na vitrine", async ({ page }, info) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
   const run = `${info.project.name}-${Date.now()}`.replace(/[^A-Za-z0-9]/g, "-");
   const sku = `CAT-${run}`.toUpperCase().slice(0, 32);
@@ -51,15 +55,22 @@ test("cadastro, edição de preço/imagem e reflexo na vitrine", async ({ page }
     productId = (await created.json()).data.id;
     expect(productId).toBeTruthy();
 
-    // Upload de imagem (múltiplas imagens são suportadas; validamos a primeira).
+    // Upload de imagem para o Cloudflare R2.
     const uploaded = await page.request.post(`/api/admin/products/${productId}/images`, {
       headers: { Origin: ORIGIN },
       multipart: { file: { name: "pixel.png", mimeType: "image/png", buffer: PNG } },
     });
     expect(uploaded.status()).toBe(201);
     const image = (await uploaded.json()).data;
-    // Local (development) or R2 (Cloudflare) — both are valid outcomes.
-    expect(image.url).toMatch(/^(\/uploads\/products\/|https:\/\/)/);
+    expect(image.id).toBeTruthy();
+    // With R2 configured, the stored object is served from the public URL.
+    expect(image.url).toMatch(/^https:\/\//);
+
+    // Leitura pública do objeto recém-enviado.
+    const read = await page.request.get(image.url);
+    expect(read.status()).toBe(200);
+    expect(String(read.headers()["content-type"] ?? "")).toContain("image/png");
+    expect(Buffer.from(await read.body())).toEqual(PNG);
 
     // Edição de preço.
     const edited = await page.request.patch(`/api/admin/products/${productId}`, {
@@ -79,6 +90,29 @@ test("cadastro, edição de preço/imagem e reflexo na vitrine", async ({ page }
     const card = page.locator(".product-card").filter({ hasText: name });
     await expect(card).toHaveCount(1);
     await expect(card).toContainText("29,90");
+
+    // Atualização (substituição) da imagem: novo objeto criado, antigo removido.
+    const replaced = await page.request.patch(`/api/admin/products/${productId}/images/${image.id}`, {
+      headers: { Origin: ORIGIN },
+      multipart: { file: { name: "updated.png", mimeType: "image/png", buffer: PNG_ALT } },
+    });
+    expect(replaced.status()).toBe(200);
+    const newImage = (await replaced.json()).data;
+    expect(newImage.id).toBe(image.id);
+    expect(newImage.url).not.toBe(image.url);
+    expect((await page.request.get(image.url)).status()).toBe(404);
+    const newRead = await page.request.get(newImage.url);
+    expect(newRead.status()).toBe(200);
+    expect(Buffer.from(await newRead.body())).toEqual(PNG_ALT);
+
+    // Remoção da imagem: linha e objeto R2 removidos.
+    const removed = await page.request.delete(`/api/admin/products/${productId}/images/${image.id}`, {
+      headers: { Origin: ORIGIN },
+    });
+    expect(removed.status()).toBe(200);
+    const list = (await (await page.request.get(`/api/admin/products/${productId}/images`)).json()).data;
+    expect(list).toHaveLength(0);
+    expect((await page.request.get(newImage.url)).status()).toBe(404);
 
     // Arquivar (soft delete) oculta o produto da vitrine.
     const archived = await page.request.delete(`/api/admin/products/${productId}`, {
