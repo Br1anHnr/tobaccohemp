@@ -1,3 +1,5 @@
+import type { OrderStatus } from "@/shared/contracts/orders";
+
 export type StatusValue =
   | "ativo"
   | "novo"
@@ -5,7 +7,8 @@ export type StatusValue =
   | "em_estoque"
   | "baixo"
   | "esgotado"
-  | "arquivado";
+  | "arquivado"
+  | OrderStatus;
 
 const STATUS_LABEL: Record<StatusValue, string> = {
   ativo: "Ativo",
@@ -15,6 +18,12 @@ const STATUS_LABEL: Record<StatusValue, string> = {
   baixo: "Estoque baixo",
   esgotado: "Esgotado",
   arquivado: "Arquivado",
+  draft: "Rascunho",
+  pending_payment: "Aguardando pagamento",
+  paid: "Pago",
+  expired: "Expirado",
+  canceled: "Cancelado",
+  refunded: "Estornado",
 };
 
 export function StatusBadge({ status }: { status: StatusValue }) {

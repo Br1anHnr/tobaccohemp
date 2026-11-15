@@ -130,6 +130,64 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS admin_login_attempts_at_idx ON admin_login_attempts (attempted_at);
     `,
   },
+  {
+    id: "003_orders_core",
+    sql: `
+      CREATE TABLE IF NOT EXISTS orders (
+        id TEXT PRIMARY KEY,
+        order_number TEXT NOT NULL,
+        customer_account_id TEXT REFERENCES customer_accounts(id) ON DELETE SET NULL,
+        customer_label TEXT NOT NULL DEFAULT 'Pedido demonstrativo',
+        status TEXT NOT NULL,
+        channel TEXT NOT NULL,
+        payment_provider TEXT NOT NULL,
+        payment_method TEXT NOT NULL,
+        provider_reference TEXT,
+        checkout_url TEXT,
+        subtotal_cents INTEGER NOT NULL CHECK (subtotal_cents >= 0),
+        shipping_cents INTEGER NOT NULL DEFAULT 0 CHECK (shipping_cents >= 0),
+        discount_cents INTEGER NOT NULL DEFAULT 0 CHECK (discount_cents >= 0),
+        total_cents INTEGER NOT NULL CHECK (total_cents >= 0),
+        currency TEXT NOT NULL DEFAULT 'BRL',
+        is_demo BOOLEAN NOT NULL DEFAULT true,
+        eligibility_status TEXT NOT NULL,
+        expires_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS orders_number_upper_idx ON orders (upper(order_number));
+      CREATE INDEX IF NOT EXISTS orders_status_created_idx ON orders (status, created_at DESC);
+      CREATE INDEX IF NOT EXISTS orders_customer_account_idx ON orders (customer_account_id);
+
+      CREATE TABLE IF NOT EXISTS order_items (
+        id TEXT PRIMARY KEY,
+        order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+        product_id TEXT NOT NULL,
+        sku TEXT NOT NULL,
+        product_name TEXT NOT NULL,
+        category_slug TEXT NOT NULL,
+        variant TEXT NOT NULL DEFAULT '',
+        quantity INTEGER NOT NULL CHECK (quantity > 0),
+        unit_price_cents INTEGER NOT NULL CHECK (unit_price_cents >= 0),
+        line_total_cents INTEGER NOT NULL CHECK (line_total_cents >= 0),
+        eligible BOOLEAN NOT NULL DEFAULT true
+      );
+      CREATE INDEX IF NOT EXISTS order_items_order_idx ON order_items (order_id);
+
+      CREATE TABLE IF NOT EXISTS order_status_history (
+        id TEXT PRIMARY KEY,
+        order_id TEXT NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+        from_status TEXT,
+        to_status TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        actor_type TEXT NOT NULL,
+        actor_id TEXT,
+        metadata_json TEXT NOT NULL DEFAULT '{}',
+        created_at TIMESTAMPTZ NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS order_status_history_order_idx ON order_status_history (order_id, created_at ASC);
+    `,
+  },
 ];
 
 let running: Promise<void> | undefined;

@@ -311,6 +311,56 @@ test("checkout validates, confirms demo order and clears persisted cart", async 
   ).toBeVisible();
 });
 
+test("checkout supports decoupled channel and payment method without collecting card data or storing PII", async ({
+  page,
+}) => {
+  await enter(page, "/produto/case-compact-preto");
+  await page
+    .getByRole("button", { name: "Adicionar Case Compact Preto ao carrinho" })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByRole("link", { name: "Finalizar pedido" })
+    .click();
+
+  await expect(page.locator("input[name='cardNumber']")).toHaveCount(0);
+  await page.getByLabel(/Continuar no WhatsApp/).check();
+  await page.getByLabel(/Pix \(simulação\)/).check();
+
+  const values: Record<string, string> = {
+    name: "Cliente Simulação",
+    email: "privado@example.com",
+    phone: "11988887777",
+    zip: "01001000",
+    address: "Rua Teste",
+    number: "42",
+    city: "São Paulo",
+  };
+  for (const [key, value] of Object.entries(values))
+    await page.locator(`#checkout-${key}`).fill(value);
+  await page.getByLabel("Estado", { exact: true }).selectOption("SP");
+  await page
+    .getByLabel("Entendo que este pedido é apenas uma demonstração.")
+    .check();
+  await page
+    .getByRole("button", { name: "Finalizar pedido", exact: true })
+    .click();
+
+  await expect(page).toHaveURL(/pedido-confirmado/);
+  await expect(page.locator(".confirmation")).toContainText("Link via WhatsApp");
+  await expect(page.locator(".confirmation")).toContainText("Provedor: demo (desacoplado)");
+  await expect(page.locator(".demo-pix-code")).toContainText("SEM-VALOR-FINANCEIRO");
+
+  await page.locator(".confirmation-details summary").click();
+  await expect(page.locator(".confirmation-items")).toContainText("Case Compact Preto");
+  await expect(page.locator(".confirmation-history")).toContainText("Aguardando pagamento");
+
+  const stored = await page.evaluate(() => sessionStorage.getItem("th-demo-order") ?? "");
+  expect(stored).not.toContain("privado@example.com");
+  expect(stored).not.toContain("Cliente Simulação");
+  expect(stored).not.toContain("11988887777");
+});
+
 test("basic accessibility for age gate, home, search and checkout", async ({
   page,
 }) => {

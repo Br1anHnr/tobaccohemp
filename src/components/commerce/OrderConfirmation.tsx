@@ -1,14 +1,22 @@
 "use client";
 import { useEffect, useState } from "react";
-import { Check } from "lucide-react";
+import { Check, Copy } from "lucide-react";
 import { useOrder } from "@/store/order-store";
 import { STORAGE } from "@/lib/constants";
 import { currency } from "@/lib/currency";
+import {
+  ORDER_CHANNEL_LABEL,
+  ORDER_PAYMENT_METHOD_LABEL,
+  ORDER_STATUS_LABEL,
+} from "@/modules/orders/domain/order-status";
 import { ButtonLink } from "@/components/ui/Button";
+
 export function OrderConfirmation() {
   const order = useOrder((s) => s.order);
   const setOrder = useOrder((s) => s.setOrder);
   const [ready, setReady] = useState(false);
+  const [copied, setCopied] = useState(false);
+
   useEffect(() => {
     const timer = setTimeout(() => {
       if (!order) {
@@ -33,7 +41,9 @@ export function OrderConfirmation() {
     }, 0);
     return () => clearTimeout(timer);
   }, [order, setOrder]);
+
   if (!ready) return <p role="status">Carregando confirmação…</p>;
+
   return (
     <div className="confirmation">
       <span className="confirmation-icon">
@@ -56,6 +66,90 @@ export function OrderConfirmation() {
             <strong>{currency(order.total)}</strong>
             <span>Entrega a combinar</span>
           </div>
+
+          {order.status && (
+            <div className="confirmation-meta">
+              <span className="confirmation-pill">
+                Status: {ORDER_STATUS_LABEL[order.status]} (demo)
+              </span>
+              {order.channel && (
+                <span className="confirmation-pill">
+                  {ORDER_CHANNEL_LABEL[order.channel]}
+                </span>
+              )}
+              {order.paymentMethod && (
+                <span className="confirmation-pill">
+                  {ORDER_PAYMENT_METHOD_LABEL[order.paymentMethod]}
+                </span>
+              )}
+              {order.provider && (
+                <span className="confirmation-pill">
+                  Provedor: {order.provider} (desacoplado)
+                </span>
+              )}
+            </div>
+          )}
+
+          {order.providerNotice && (
+            <div className="confirmation-sim-box">
+              <p>{order.providerNotice}</p>
+              {order.providerReference && (
+                <p className="confirmation-ref">
+                  Referência sandbox: <code>{order.providerReference}</code>
+                </p>
+              )}
+              {order.pixCopyPaste && (
+                <div className="demo-pix-wrap">
+                  <code className="demo-pix-code">{order.pixCopyPaste}</code>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={() => {
+                      navigator.clipboard
+                        ?.writeText(order.pixCopyPaste ?? "")
+                        .then(() => setCopied(true))
+                        .catch(() => {});
+                    }}
+                  >
+                    <Copy size={14} aria-hidden="true" />
+                    {copied ? "Código copiado" : "Copiar código demo"}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {order.items && order.items.length > 0 && (
+            <details className="confirmation-details">
+              <summary>Ver itens, valores congelados e histórico</summary>
+              <ul className="confirmation-items">
+                {order.items.map((item) => (
+                  <li key={`${item.productId}:${item.variant ?? ""}`}>
+                    <span>
+                      {item.quantity} × {item.name}
+                      {item.variant ? ` · ${item.variant}` : ""}
+                    </span>
+                    <strong>{currency(item.lineTotalCents / 100)}</strong>
+                  </li>
+                ))}
+              </ul>
+              {order.history && order.history.length > 0 && (
+                <ol className="confirmation-history">
+                  {order.history.map((entry, idx) => (
+                    <li key={`${entry.toStatus}-${idx}`}>
+                      <strong>
+                        {entry.fromStatus
+                          ? `${ORDER_STATUS_LABEL[entry.fromStatus]} → ${ORDER_STATUS_LABEL[entry.toStatus]}`
+                          : ORDER_STATUS_LABEL[entry.toStatus]}
+                      </strong>
+                      <span>{entry.reason}</span>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </details>
+          )}
+
           <p>
             Nenhuma cobrança foi realizada.
             <br />

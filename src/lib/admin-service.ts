@@ -5,6 +5,12 @@ import type {
   AdminUser, Customer as WireCustomer, Product, ProductInput, InventoryItem,
   DashboardMetrics as WireMetrics, DataResponse, LoginInput, Category, CategoryInput,
 } from "@/shared/contracts/admin";
+import type {
+  CreateOrderInput,
+  Order,
+  OrderDetail,
+  UpdateOrderStatusInput,
+} from "@/shared/contracts/orders";
 
 export const sessionExpiredEvent = "th-admin-session-expired";
 
@@ -104,8 +110,25 @@ export const createCategory = (input: CategoryInput) =>
     body: JSON.stringify(input),
   });
 
+export const fetchOrders = () => request<Order[]>(adminEndpoints.orders);
+
+export const fetchOrderDetail = (id: string) =>
+  request<OrderDetail>(`${adminEndpoints.orders}/${encodeURIComponent(id)}`);
+
+export const createAdminOrder = (input: CreateOrderInput) =>
+  request<OrderDetail>(adminEndpoints.orders, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+
 export const updateCategory = (slug: string, input: Partial<CategoryInput>) =>
   request<Category>(`${adminEndpoints.categories}/${encodeURIComponent(slug)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+
+export const updateOrderStatus = (id: string, input: UpdateOrderStatusInput) =>
+  request<OrderDetail>(`${adminEndpoints.orders}/${encodeURIComponent(id)}`, {
     method: "PATCH", headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   });
@@ -144,7 +167,6 @@ export async function replaceProductImage(productId: string, imageId: string, fi
   );
   return { id: image.id, url: image.url, alt: image.alt, position: image.position };
 }
-
 export async function fetchDashboard(): Promise<DashboardMetrics> {
   const [metrics, products] = await Promise.all([
     request<WireMetrics>(adminEndpoints.dashboard), fetchProducts(),
