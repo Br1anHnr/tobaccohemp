@@ -2,9 +2,11 @@ import type { Metadata } from "next";
 import { Container } from "@/components/layout/Container";
 import { PageIntro } from "@/components/layout/PageIntro";
 import { CategoryCard } from "@/components/commerce/CategoryCard";
-import { categories } from "@/data/categories";
+import { getStorefrontCategories } from "@/lib/storefront";
 export const metadata: Metadata = { title: "Categorias" };
-export default function CategoriesPage() {
+export const dynamic = "force-dynamic";
+export default async function CategoriesPage() {
+  const categories = await getStorefrontCategories();
   return (
     <Container className="page-container">
       <PageIntro

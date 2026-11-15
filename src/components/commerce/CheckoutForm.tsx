@@ -3,9 +3,9 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Check, ArrowRight } from "lucide-react";
 import { useCart } from "@/store/cart-store";
+import { useCatalog } from "@/store/catalog-store";
 import { useOrder } from "@/store/order-store";
 import { STORAGE } from "@/lib/constants";
-import { findProduct } from "@/data/products";
 import { currency } from "@/lib/currency";
 import {
   checkoutFields,
@@ -47,6 +47,7 @@ const states = [
 export function CheckoutForm() {
   const items = useCart((s) => s.items);
   const hydrated = useCart((s) => s.hydrated);
+  const products = useCatalog((s) => s.products);
   const clear = useCart((s) => s.clear);
   const setOrder = useOrder((s) => s.setOrder);
   const router = useRouter();
@@ -196,7 +197,7 @@ export function CheckoutForm() {
         <h2>Sua seleção</h2>
         <div className="checkout-items">
           {items.map((item) => {
-            const p = findProduct(item.productId)!;
+            const p = products.find((product) => product.id === item.productId)!;
             return (
               <p key={`${item.productId}:${item.variant}`}>
                 <span>

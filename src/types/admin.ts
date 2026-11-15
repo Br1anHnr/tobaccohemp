@@ -14,9 +14,19 @@ export interface Customer {
 
 export type StockStatus = "em_estoque" | "baixo" | "esgotado";
 
+export interface AdminProductImage {
+  id: string;
+  url: string;
+  alt: string;
+  position: number;
+}
+
 export interface AdminProduct {
   id: string;
+  slug: string;
   name: string;
+  description: string;
+  brand: string;
   category: string;
   categorySlug: string;
   price: number;
@@ -25,8 +35,23 @@ export interface AdminProduct {
   revenue: number | null;
   sku?: string;
   active?: boolean;
+  archived?: boolean;
+  isNew?: boolean;
+  isFeatured?: boolean;
+  variants?: string[];
+  tags?: string[];
+  images?: AdminProductImage[];
   reorderPoint?: number;
   status: StockStatus;
+}
+
+export interface AdminCategory {
+  slug: string;
+  name: string;
+  description: string;
+  image: string;
+  productCount: number;
+  createdAt: string;
 }
 
 export interface Kpi {

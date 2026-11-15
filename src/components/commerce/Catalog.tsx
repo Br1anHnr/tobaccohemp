@@ -2,13 +2,14 @@
 import { startTransition, useMemo, useOptimistic, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Search, SlidersHorizontal, X } from "lucide-react";
-import { products } from "@/data/products";
-import { categories } from "@/data/categories";
+import { useCatalog } from "@/store/catalog-store";
 import { currency } from "@/lib/currency";
 import { normalize } from "@/lib/utils";
 import { ProductGrid } from "./ProductGrid";
-const brands = [...new Set(products.map((p) => p.brand))];
 export function Catalog({ categorySlug }: { categorySlug?: string }) {
+  const products = useCatalog((s) => s.products);
+  const categories = useCatalog((s) => s.categories);
+  const brands = [...new Set(products.map((p) => p.brand))];
   const router = useRouter();
   const searchParams = useSearchParams();
   const [optimisticQuery, setOptimisticQuery] = useOptimistic(
@@ -117,7 +118,7 @@ export function Catalog({ categorySlug }: { categorySlug?: string }) {
                 ? Number(b.isNew) - Number(a.isNew)
                 : Number(b.isFeatured) - Number(a.isFeatured),
         ),
-    [category, brand, onlyNew, maxPrice, sort, needle],
+    [category, brand, onlyNew, maxPrice, sort, needle, products],
   );
   return (
     <div className="catalog">

@@ -8,7 +8,7 @@ import { invalid } from "@/shared/server/validation";
 export async function dashboardMetrics(db: Db = pool()): Promise<DashboardMetrics> {
   const products = await listProducts(db);
   const inventory = await listInventory(db);
-  const active = products.filter(product => product.active);
+  const active = products.filter(product => product.active && !product.archived);
   const metrics = {
     customers: (await listCustomers(db)).length, products: products.length,
     units: inventory.reduce((total, item) => total + item.quantity, 0),

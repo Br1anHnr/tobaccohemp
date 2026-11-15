@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useCart, cartTotal, cartCount } from "@/store/cart-store";
+import { useCatalog } from "@/store/catalog-store";
 import { currency } from "@/lib/currency";
 import { itemKey } from "@/lib/utils";
 import { Modal } from "@/components/ui/Modal";
@@ -10,6 +11,7 @@ export function CartDrawer() {
   const items = useCart((s) => s.items);
   const overlay = useCart((s) => s.overlay);
   const close = useCart((s) => s.setOverlay);
+  useCatalog((s) => s.products);
   return (
     <Modal
       open={overlay === "cart"}

@@ -4,7 +4,8 @@ export type StatusValue =
   | "inativo"
   | "em_estoque"
   | "baixo"
-  | "esgotado";
+  | "esgotado"
+  | "arquivado";
 
 const STATUS_LABEL: Record<StatusValue, string> = {
   ativo: "Ativo",
@@ -13,6 +14,7 @@ const STATUS_LABEL: Record<StatusValue, string> = {
   em_estoque: "Em estoque",
   baixo: "Estoque baixo",
   esgotado: "Esgotado",
+  arquivado: "Arquivado",
 };
 
 export function StatusBadge({ status }: { status: StatusValue }) {

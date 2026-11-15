@@ -1,9 +1,9 @@
-import type { Customer, AdminProduct, DashboardMetrics } from "@/types/admin";
+import type { Customer, AdminProduct, AdminProductImage, DashboardMetrics } from "@/types/admin";
 import { currency } from "@/lib/currency";
 import { adminEndpoints } from "@/shared/contracts/admin";
 import type {
   AdminUser, Customer as WireCustomer, Product, ProductInput, InventoryItem,
-  DashboardMetrics as WireMetrics, DataResponse, LoginInput,
+  DashboardMetrics as WireMetrics, DataResponse, LoginInput, Category, CategoryInput,
 } from "@/shared/contracts/admin";
 
 export const sessionExpiredEvent = "th-admin-session-expired";
@@ -51,9 +51,25 @@ export async function fetchProducts(): Promise<AdminProduct[]> {
     const item = inventory.find(row => row.productId === product.id);
     if (!item) throw new AdminApiError(502, "Estoque indisponível para um produto.");
     return {
-      id: product.id, name: product.name, sku: product.sku, active: product.active,
-      category: "Sem categoria", categorySlug: "sem-categoria", price: product.priceCents / 100,
-      stock: item.quantity, reorderPoint: item.reorderPoint, sold: null, revenue: null,
+      id: product.id,
+      slug: product.slug,
+      name: product.name,
+      description: product.description,
+      brand: product.brand,
+      category: product.categoryName ?? "Sem categoria",
+      categorySlug: product.categorySlug ?? "sem-categoria",
+      price: product.priceCents / 100,
+      stock: item.quantity,
+      reorderPoint: item.reorderPoint,
+      sold: null, revenue: null,
+      sku: product.sku,
+      active: product.active,
+      archived: product.archived,
+      isNew: product.isNew,
+      isFeatured: product.isFeatured,
+      variants: product.variants,
+      tags: product.tags,
+      images: product.images,
       status: item.quantity === 0 ? "esgotado" : item.quantity <= item.reorderPoint ? "baixo" : "em_estoque",
     };
   });
@@ -71,6 +87,64 @@ export const createProduct = (input: ProductInput) =>
     body: JSON.stringify(input),
   });
 
+export const updateProduct = (id: string, input: ProductInput) =>
+  request<Product>(`${adminEndpoints.products}/${encodeURIComponent(id)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+
+export const archiveProduct = (id: string) =>
+  request<Product>(`${adminEndpoints.products}/${encodeURIComponent(id)}`, { method: "DELETE" });
+
+export const fetchCategories = () => request<Category[]>(adminEndpoints.categories);
+
+export const createCategory = (input: CategoryInput) =>
+  request<Category>(adminEndpoints.categories, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+
+export const updateCategory = (slug: string, input: Partial<CategoryInput>) =>
+  request<Category>(`${adminEndpoints.categories}/${encodeURIComponent(slug)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+
+export const deleteCategory = (slug: string) =>
+  request<null>(`${adminEndpoints.categories}/${encodeURIComponent(slug)}`, { method: "DELETE" });
+
+export async function uploadProductImage(productId: string, file: File, alt = ""): Promise<AdminProductImage> {
+  const form = new FormData();
+  form.set("file", file);
+  form.set("alt", alt);
+  const image = await request<AdminProductImage>(
+    `${adminEndpoints.products}/${encodeURIComponent(productId)}/images`,
+    { method: "POST", body: form },
+  );
+  return { id: image.id, url: image.url, alt: image.alt, position: image.position };
+}
+
+export const reorderProductImages = (productId: string, images: { id: string; position: number }[]) =>
+  request<AdminProductImage[]>(`${adminEndpoints.products}/${encodeURIComponent(productId)}/images`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ images }),
+  });
+
+export const deleteProductImage = (productId: string, imageId: string) =>
+  request<null>(`${adminEndpoints.products}/${encodeURIComponent(productId)}/images/${encodeURIComponent(imageId)}`, {
+    method: "DELETE",
+  });
+
+export async function replaceProductImage(productId: string, imageId: string, file: File): Promise<AdminProductImage> {
+  const form = new FormData();
+  form.set("file", file);
+  const image = await request<AdminProductImage>(
+    `${adminEndpoints.products}/${encodeURIComponent(productId)}/images/${encodeURIComponent(imageId)}`,
+    { method: "PATCH", body: form },
+  );
+  return { id: image.id, url: image.url, alt: image.alt, position: image.position };
+}
+
 export async function fetchDashboard(): Promise<DashboardMetrics> {
   const [metrics, products] = await Promise.all([
     request<WireMetrics>(adminEndpoints.dashboard), fetchProducts(),
@@ -84,6 +158,6 @@ export async function fetchDashboard(): Promise<DashboardMetrics> {
       { id: "conversion", label: "Unidades em estoque", value: String(metrics.units), delta: null, direction: "up", hint },
     ],
     salesSeries: [], categoryPerformance: [],
-    lowStock: products.filter(product => product.active && product.stock <= (product.reorderPoint ?? 0)),
+    lowStock: products.filter(product => product.active && !product.archived && product.stock <= (product.reorderPoint ?? 0)),
   };
 }

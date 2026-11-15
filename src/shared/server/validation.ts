@@ -23,6 +23,14 @@ export function textInput(value: unknown, max: number): string {
   return text;
 }
 
+/** Like `textInput`, but permits an empty string (e.g. optional descriptions). */
+export function textInputAllowEmpty(value: unknown, max: number): string {
+  if (typeof value !== "string") invalid();
+  const text = value.trim();
+  if (text.length > max || /[\u0000-\u001f\u007f]/u.test(text)) invalid();
+  return text;
+}
+
 export function integerInput(value: unknown): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) invalid();
   return value;

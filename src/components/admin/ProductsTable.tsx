@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { Minus, Plus } from "lucide-react";
+import { Archive, ArchiveRestore, Minus, Pencil, Plus } from "lucide-react";
 import { currency } from "@/lib/currency";
-import { fetchProducts, updateStock } from "@/lib/admin-service";
+import { fetchProducts, fetchCategories, updateStock, archiveProduct, updateProduct } from "@/lib/admin-service";
 import { useResource } from "@/lib/use-resource";
 import { DataTable, type Column, type Filter } from "./DataTable";
 import { StatusBadge } from "./Badge";
@@ -26,41 +26,57 @@ const filtersFor = (rows: AdminProduct[]): Filter<AdminProduct>[] => [
       { value: "em_estoque", label: "Em estoque" },
       { value: "baixo", label: "Estoque baixo" },
       { value: "esgotado", label: "Esgotados" },
+      { value: "arquivado", label: "Arquivados" },
     ],
-    match: (row, value) => row.status === value,
+    match: (row, value) => (value === "arquivado" ? Boolean(row.archived) : !row.archived && row.status === value),
   },
 ];
 
 export function ProductsTable() {
-  const { status, data, retry, fail } = useResource(fetchProducts);
+  const productsResource = useResource(fetchProducts);
+  const categoriesResource = useResource(fetchCategories);
+  const { status, data, retry, fail } = productsResource;
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [mutationError, setMutationError] = useState("");
-  const [createOpen, setCreateOpen] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<AdminProduct | null>(null);
   const busy = useRef(false);
   const rows = data ?? [];
+  const categories = categoriesResource.data ?? [];
   const filters = useMemo(() => filtersFor(data ?? []), [data]);
 
-  const adjustStock = async (id: string, delta: number) => {
-    const product = data?.find(row => row.id === id);
-    if (busy.current || !product) return;
+  const mutate = async (id: string, operation: () => Promise<unknown>) => {
+    if (busy.current) return;
     busy.current = true; setPendingId(id); setMutationError("");
     try {
-      await updateStock(id, Math.max(0, product.stock + delta), product.reorderPoint ?? 0);
+      await operation();
       retry();
     } catch (error) {
-      setMutationError(error instanceof Error ? error.message : "Não foi possível atualizar o estoque.");
+      setMutationError(error instanceof Error ? error.message : "Não foi possível concluir a operação.");
     } finally { busy.current = false; setPendingId(null); }
   };
+
+  const adjustStock = (id: string, delta: number) => {
+    const product = data?.find(row => row.id === id);
+    if (!product) return;
+    void mutate(id, () => updateStock(id, Math.max(0, product.stock + delta), product.reorderPoint ?? 0));
+  };
+
+  const toggleArchive = (product: AdminProduct) =>
+    void mutate(product.id, () => product.archived ? updateProduct(product.id, { archived: false }) : archiveProduct(product.id));
 
   const columns: Column<AdminProduct>[] = [
     {
       key: "name",
       header: "Produto",
-      searchText: (p) => `${p.name} ${p.category}`,
+      searchText: (p) => `${p.name} ${p.category} ${p.sku ?? ""}`,
       render: (p) => (
         <>
           <span className="cell-primary">{p.name}</span>
-          <span className="cell-sub">{p.category}</span>
+          <span className="cell-sub">
+            {p.category}
+            {p.archived ? " · Arquivado" : ""}
+          </span>
         </>
       ),
     },
@@ -107,14 +123,32 @@ export function ProductsTable() {
     {
       key: "status",
       header: "Status",
-      render: (p) => <StatusBadge status={p.status} />,
+      render: (p) => (p.archived ? <StatusBadge status="arquivado" /> : <StatusBadge status={p.status} />),
     },
     {
-      key: "sold",
-      header: "Vendidos",
-      numeric: true,
-      sortValue: (p) => p.sold ?? 0,
-      render: (p) => p.sold ?? "—",
+      key: "actions",
+      header: "Ações",
+      render: (p) => (
+        <span className="row-actions">
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={`Editar ${p.name}`}
+            onClick={() => { setEditing(p); setFormOpen(true); }}
+          >
+            <Pencil size={16} />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={p.archived ? `Desarquivar ${p.name}` : `Arquivar ${p.name}`}
+            disabled={pendingId !== null}
+            onClick={() => toggleArchive(p)}
+          >
+            {p.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
+          </button>
+        </span>
+      ),
     },
   ];
 
@@ -125,7 +159,7 @@ export function ProductsTable() {
       <button
         type="button"
         className="button button-primary"
-        onClick={() => setCreateOpen(true)}
+        onClick={() => { setEditing(null); setFormOpen(true); }}
       >
         Cadastrar produto
       </button>
@@ -134,7 +168,7 @@ export function ProductsTable() {
       columns={columns}
       rows={rows}
       filters={filters}
-      searchPlaceholder="Buscar por produto ou categoria"
+      searchPlaceholder="Buscar por produto, SKU ou categoria"
       caption="Lista de produtos e estoque demonstrativos"
       status={status}
       onRetry={retry}
@@ -142,11 +176,15 @@ export function ProductsTable() {
       emptyTitle="Nenhum produto encontrado."
       emptyText="Ajuste a busca ou os filtros para ver os produtos e o estoque."
     />
-    <ProductForm
-      open={createOpen}
-      onClose={() => setCreateOpen(false)}
-      onCreated={retry}
-    />
+    {formOpen && (
+      <ProductForm
+        open={formOpen}
+        onClose={() => setFormOpen(false)}
+        onSaved={retry}
+        product={editing}
+        categories={categories}
+      />
+    )}
     </>
   );
 }

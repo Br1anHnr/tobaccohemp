@@ -7,6 +7,7 @@ import {
   LayoutDashboard,
   Package,
   ShoppingCart,
+  Tags,
   Users,
 } from "lucide-react";
 import { Logo } from "@/components/layout/Logo";
@@ -15,6 +16,7 @@ const items = [
   { label: "Visão geral", href: "/admin", icon: LayoutDashboard },
   { label: "Clientes", href: "/admin/clientes", icon: Users },
   { label: "Produtos & estoque", href: "/admin/produtos", icon: Package },
+  { label: "Categorias", href: "/admin/categorias", icon: Tags },
 ];
 
 export function AdminSidebar({

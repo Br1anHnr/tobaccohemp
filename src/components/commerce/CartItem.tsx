@@ -3,12 +3,13 @@ import Image from "next/image";
 import Link from "next/link";
 import { Trash2 } from "lucide-react";
 import type { CartItem as Item } from "@/types/cart";
-import { findProduct } from "@/data/products";
+import { useCatalog } from "@/store/catalog-store";
 import { useCart } from "@/store/cart-store";
 import { currency } from "@/lib/currency";
 import { QuantitySelector } from "./QuantitySelector";
 export function CartItem({ item }: { item: Item }) {
-  const product = findProduct(item.productId);
+  const products = useCatalog((s) => s.products);
+  const product = products.find((p) => p.id === item.productId);
   const update = useCart((s) => s.quantity);
   const remove = useCart((s) => s.remove);
   const close = useCart((s) => s.setOverlay);

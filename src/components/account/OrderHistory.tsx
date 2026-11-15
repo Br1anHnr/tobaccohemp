@@ -4,16 +4,17 @@ import Image from "next/image";
 import Link from "next/link";
 import { RotateCcw } from "lucide-react";
 import { demoOrders, orderStatusLabel } from "@/data/account-demo";
-import { findProduct } from "@/data/products";
+import { useCatalog } from "@/store/catalog-store";
 import { currency } from "@/lib/currency";
 import { formatDate, orderCount, orderSubtotal, orderTotal } from "@/lib/orders";
 import { useCart } from "@/store/cart-store";
 import type { CustomerOrder, OrderStatus } from "@/types/account";
 
 export function OrderCard({ order }: { order: CustomerOrder }) {
+  const products = useCatalog((s) => s.products);
   const add = useCart((s) => s.add);
   const available = order.items.filter(
-    (item) => (findProduct(item.productId)?.stock ?? 0) > 0,
+    (item) => (products.find((p) => p.id === item.productId)?.stock ?? 0) > 0,
   );
   return (
     <article className="order-card">
@@ -34,7 +35,7 @@ export function OrderCard({ order }: { order: CustomerOrder }) {
         <summary>Ver itens e valores</summary>
         <ul className="order-items">
           {order.items.map((item) => {
-            const product = findProduct(item.productId);
+            const product = products.find((p) => p.id === item.productId);
             if (!product) return null;
             return (
               <li key={`${item.productId}:${item.variant ?? ""}`}>

@@ -2,8 +2,9 @@ import { Container } from "@/components/layout/Container";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { CategoryCard } from "@/components/commerce/CategoryCard";
 import { Reveal } from "@/components/ui/Reveal";
-import { categories } from "@/data/categories";
-export function CategoriesSection() {
+import { getStorefrontCategories } from "@/lib/storefront";
+export async function CategoriesSection() {
+  const categories = await getStorefrontCategories();
   return (
     <section id="categorias" className="section categories-section">
       <Container>
