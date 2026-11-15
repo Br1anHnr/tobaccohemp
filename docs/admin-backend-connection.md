@@ -4,7 +4,8 @@ A interface administrativa em `/admin` usa as próprias rotas `/api/admin/*` do
 Next.js, que persistem em PostgreSQL (Neon) via `pg`. Não há proxy externo,
 backend separado nem mocks: o catálogo é semeado a partir de `src/data` e todas
 as mutações confirmam no banco. Fora de `development`/`test`, o backend responde
-**503** de propósito — esta proteção permanece nesta etapa.
+**503** por padrão; o bloqueio só é liberado em produção com a variável de
+deploy `ADMIN_ENABLED=1` (opt-in explícito, nunca incondicional).
 
 ## Pré-requisitos
 
@@ -48,27 +49,30 @@ acessibilidade. Cada execução cria um produto com SKU `E2E-*` e o remove ao
 final (via `pg`); os dois produtos `E2E-*` remanescentes da missão anterior
 foram removidos manualmente do banco.
 
+## O que já foi preparado para um Preview da Vercel
+
+- **Bloqueio 503 controlado**: liberado apenas com `ADMIN_ENABLED=1` em produção
+  (`src/shared/server/admin-http.ts`). Sem essa variável, o backend segue 503.
+- **Sessões serverless**: o `Map` em memória foi substituído por sessões no
+  PostgreSQL (`admin_sessions` em `src/shared/server/migrate.ts`, operadas por
+  `src/modules/auth/infrastructure/admin-auth.ts`). Apenas o digest SHA-256 do
+  token é persistido; a sessão é revogável no logout e invalidada quando
+  `ADMIN_PASSWORD` muda. O cookie continua `HttpOnly` + `SameSite=Strict` e fica
+  `Secure` em HTTPS.
+- **Rate limiting distribuído**: as tentativas de login são persistidas em
+  `admin_login_attempts`, sobrevivendo a cold starts e a múltiplas instâncias.
+
 ## O que falta para um Preview da Vercel (não feito nesta missão)
 
-O bloqueio **503** foi mantido de propósito. Para disponibilizar o dashboard com
-autenticação segura em um Preview, ainda é necessário:
-
-1. **Remover o bloqueio 503** de forma controlada (por variável de ambiente de
-   deploy, nunca incondicional) e habilitar o backend em produção.
-2. **Sessões serverless**: substituir o `Map` em memória
-   (`src/modules/auth/infrastructure/admin-auth.ts`) por um token assinado em
-   cookie httpOnly ou um armazenamento distribuído (ex.: Upstash/Redis ou
-   sessões no banco). O estado atual não sobrevive a cold starts nem escala
-   entre instâncias.
-3. **Contas e segredos**: trocar a senha única em `ADMIN_PASSWORD` comparada por
+1. **Contas e segredos**: trocar a senha única em `ADMIN_PASSWORD` comparada por
    hash por usuários reais com senha hash (bcrypt/argon2), e mover segredos para
    as Environment Variables da Vercel.
-4. **Migrações**: executar `migrate.ts`/`seed.ts` em uma etapa de build/CI em vez
+2. **Migrações**: executar `migrate.ts`/`seed.ts` em uma etapa de build/CI em vez
    de lazy na primeira requisição de cada cold start.
-5. **Driver/conexão**: usar o pooler do Neon (já configurado) ou
+3. **Driver/conexão**: usar o pooler do Neon (já configurado) ou
    `@neondatabase/serverless` para conexões em ambiente serverless.
-6. **Defesa em profundidade**: rate limiting distribuído e, opcionalmente, token
-   CSRF (o Origin + `SameSite=Strict` já é uma base válida).
+4. **Defesa em profundidade**: opcionalmente, token CSRF por requisição (o Origin
+   + `SameSite=Strict` já é uma base válida).
 
 ## Resultado desta conexão
 

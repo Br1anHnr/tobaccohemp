@@ -6,6 +6,11 @@ interface Migration {
   sql: string;
 }
 
+// Versioning model: the runner keys on the full string `id` (stored in
+// `schema_migrations`), never on a numeric prefix. Array order is the only
+// application order. The three `003_*` ids below were authored independently
+// by separate branches; they remain distinct strings (no primary-key
+// collision) and are kept stable so already-applied records are preserved.
 const migrations: Migration[] = [
   {
     id: "001_init",
@@ -104,6 +109,25 @@ const migrations: Migration[] = [
         created_at TIMESTAMPTZ NOT NULL
       );
       CREATE INDEX IF NOT EXISTS product_images_product_idx ON product_images (product_id, position);
+    `,
+  },
+  {
+    id: "003_admin_sessions",
+    sql: `
+      CREATE TABLE IF NOT EXISTS admin_sessions (
+        token_hash TEXT PRIMARY KEY,
+        admin_id TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        expires_at TIMESTAMPTZ NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS admin_sessions_admin_idx ON admin_sessions (admin_id);
+
+      CREATE TABLE IF NOT EXISTS admin_login_attempts (
+        id TEXT PRIMARY KEY,
+        attempted_at TIMESTAMPTZ NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS admin_login_attempts_at_idx ON admin_login_attempts (attempted_at);
     `,
   },
 ];
