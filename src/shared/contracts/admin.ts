@@ -83,12 +83,37 @@ export interface DashboardMetrics {
   stockValueCents: number;
 }
 
+/** Minimal role-based access control. `admin` implies every `operator` capability. */
+export type AdminRole = "admin" | "operator";
+
 export interface AdminUser {
   id: string;
   name: string;
   email: string;
-  role: "admin";
+  role: AdminRole;
 }
+
+/** Administrative account (server-side view) exposed only to admins. */
+export interface AdminAccount extends AdminUser {
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AdminAccountInput {
+  name: string;
+  email: string;
+  password: string;
+  role: AdminRole;
+}
+
+export interface AdminAccountPatch {
+  name?: string;
+  role?: AdminRole;
+  active?: boolean;
+  password?: string;
+}
+
 export interface LoginInput { email: string; password: string }
 export interface DataResponse<T> { data: T }
 export interface ApiError {
@@ -103,6 +128,7 @@ export const adminEndpoints = {
   login: "/api/admin/auth/login",
   logout: "/api/admin/auth/logout",
   session: "/api/admin/auth/session",
+  accounts: "/api/admin/accounts",
   customers: "/api/admin/customers",
   products: "/api/admin/products",
   categories: "/api/admin/categories",

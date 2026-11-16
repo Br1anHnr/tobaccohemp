@@ -21,7 +21,7 @@ export async function GET(_request: NextRequest, context: { params: Promise<{ id
   return adminRoute(async () => {
     const { id } = await context.params;
     return adminMutation(db => listImages(id, db));
-  })(_request);
+  }, { role: "operator" })(_request);
 }
 
 export async function POST(request: NextRequest, context: { params: Promise<{ id: string }> }) {

@@ -13,7 +13,7 @@ export async function GET(
   return adminRoute(async () => {
     const { id } = await context.params;
     return getOrderDetail(id);
-  })(request);
+  }, { role: "operator" })(request);
 }
 
 export async function PATCH(

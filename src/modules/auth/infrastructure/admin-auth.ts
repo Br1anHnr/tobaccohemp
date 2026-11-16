@@ -1,45 +1,54 @@
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import type { AdminUser } from "@/shared/contracts/admin";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
+import type { AdminRole, AdminUser } from "@/shared/contracts/admin";
 import { pool, type Db } from "@/shared/server/database";
 import { AdminError, objectInput, textInput } from "@/shared/server/validation";
+import {
+  createAdminSession,
+  deleteAdminSessionsForAccount,
+  findAdminByEmail,
+  toAdminUser,
+  type AdminAccountRecord,
+} from "./admin-accounts";
+import { verifyAdminPassword } from "./admin-password";
 
 export const sessionCookie = "th_admin_session";
 export const sessionSeconds = 30 * 60;
-
-const admin: AdminUser = { id: "local-admin", name: "Administrador", email: "admin@example.test", role: "admin" };
 
 const ATTEMPT_WINDOW_MS = 60_000;
 const MAX_ATTEMPTS = 5;
 const MAX_SESSIONS = 100;
 
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
-// Buffer form used by timingSafeEqual so the credential comparison is constant-time.
-const digest = (value: string) => createHash("sha256").update(value).digest();
 
-function adminPassword(): string {
-  const password = process.env.ADMIN_PASSWORD;
-  if (!password) throw new AdminError(503, "NOT_CONFIGURED", "Configure ADMIN_PASSWORD no servidor.");
-  return password;
-}
+const ROLE_RANK: Record<AdminRole, number> = { operator: 1, admin: 2 };
 
 /**
- * Persistent login throttling. Sessions and attempts live in PostgreSQL so the
- * admin backend behaves correctly on serverless deployments (Vercel), where an
- * in-memory Map would not survive cold starts or scale across instances.
+ * Persistent login throttling. Attempts live in PostgreSQL so the admin backend
+ * behaves correctly on serverless deployments (Vercel), where an in-memory Map
+ * would not survive cold starts or scale across instances. Only failed logins
+ * are recorded, so a successful sign-in never contributes to the lockout.
  */
-async function throttle(db: Db): Promise<void> {
+async function throttleCheck(db: Db): Promise<void> {
   const now = Date.now();
-  await db.query("DELETE FROM admin_login_attempts WHERE attempted_at < $1", [new Date(now - ATTEMPT_WINDOW_MS).toISOString()]);
+  await db.query(
+    "DELETE FROM admin_login_attempts WHERE attempted_at < $1",
+    [new Date(now - ATTEMPT_WINDOW_MS).toISOString()],
+  );
   const result = await db.query("SELECT count(*) AS n FROM admin_login_attempts");
   if (Number(result.rows[0]?.n ?? 0) >= MAX_ATTEMPTS) {
     throw new AdminError(429, "RATE_LIMIT", "Aguarde antes de tentar novamente.");
   }
-  await db.query("INSERT INTO admin_login_attempts (id, attempted_at) VALUES ($1, $2)", [randomUUID(), new Date(now).toISOString()]);
+}
+
+async function recordFailure(db: Db): Promise<void> {
+  await db.query(
+    "INSERT INTO admin_login_attempts (id, attempted_at) VALUES ($1, $2)",
+    [randomUUID(), new Date().toISOString()],
+  );
 }
 
 export async function authenticate(value: unknown, db: Db = pool()): Promise<{ user: AdminUser; token: string }> {
-  const password = adminPassword();
-  await throttle(db);
+  await throttleCheck(db);
 
   const input = objectInput(value, ["email", "password"]);
   const email = textInput(input.email, 254).toLowerCase();
@@ -47,8 +56,13 @@ export async function authenticate(value: unknown, db: Db = pool()): Promise<{ u
   if (typeof input.password !== "string" || input.password.length > 1024) {
     throw new AdminError(422, "VALIDATION", "Dados inválidos.");
   }
-  const validPassword = timingSafeEqual(digest(input.password), digest(password));
-  if (!validPassword || email !== admin.email) throw new AdminError(401, "INVALID_CREDENTIALS", "Credenciais inválidas.");
+
+  const record: AdminAccountRecord | null = await findAdminByEmail(email, db);
+  const valid = record ? await verifyAdminPassword(input.password, record.passwordHash) : false;
+  if (!record || !valid || !record.active) {
+    await recordFailure(db);
+    throw new AdminError(401, "INVALID_CREDENTIALS", "Credenciais inválidas.");
+  }
 
   // Reap expired rows and cap the number of live sessions (defense in depth).
   await db.query("DELETE FROM admin_sessions WHERE expires_at <= now()");
@@ -61,34 +75,41 @@ export async function authenticate(value: unknown, db: Db = pool()): Promise<{ u
 
   // Persist only the SHA-256 digest of the opaque token, never the raw cookie.
   const token = randomBytes(32).toString("hex");
-  await db.query(
-    `INSERT INTO admin_sessions (token_hash, admin_id, password_hash, expires_at, created_at)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [sha256(token), admin.id, sha256(password), new Date(Date.now() + sessionSeconds * 1000).toISOString(), new Date().toISOString()],
-  );
-  return { user: { ...admin }, token };
+  await createAdminSession(record.id, sha256(token), new Date(Date.now() + sessionSeconds * 1000), db);
+  return { user: toAdminUser(record), token };
 }
 
 export async function sessionUser(token: string | undefined, db: Db = pool()): Promise<AdminUser | null> {
   if (!token) return null;
   const tokenHash = sha256(token);
-  const result = await db.query("SELECT password_hash, expires_at FROM admin_sessions WHERE token_hash = $1", [tokenHash]);
+  const result = await db.query(
+    `SELECT a.id, a.name, a.email, a.role, a.active, s.expires_at
+     FROM admin_sessions s
+     JOIN admin_accounts a ON a.id = s.admin_id
+     WHERE s.token_hash = $1`,
+    [tokenHash],
+  );
   const row = result.rows[0];
-  const password = process.env.ADMIN_PASSWORD;
   if (!row) return null;
-  // A password rotation invalidates every outstanding session immediately.
-  if (!password || new Date(row.expires_at).getTime() <= Date.now() || String(row.password_hash) !== sha256(password)) {
+  // Deactivated accounts and expired sessions are revoked lazily on use.
+  if (!row.active || new Date(row.expires_at).getTime() <= Date.now()) {
     await db.query("DELETE FROM admin_sessions WHERE token_hash = $1", [tokenHash]);
     return null;
   }
-  return { ...admin };
+  return { id: String(row.id), name: String(row.name), email: String(row.email), role: row.role === "admin" ? "admin" : "operator" };
 }
 
-export function authorize(user: AdminUser | null): void {
+/** Requires an authenticated user with at least `required` role (default: admin). */
+export function requireRole(user: AdminUser | null, required: AdminRole = "admin"): AdminUser {
   if (!user) throw new AdminError(401, "UNAUTHENTICATED", "Autenticação necessária.");
-  if (user.role !== "admin") throw new AdminError(403, "FORBIDDEN", "Acesso negado.");
+  if (ROLE_RANK[user.role] < ROLE_RANK[required]) throw new AdminError(403, "FORBIDDEN", "Acesso negado.");
+  return user;
 }
 
 export async function invalidateSession(token: string | undefined, db: Db = pool()): Promise<void> {
   if (token) await db.query("DELETE FROM admin_sessions WHERE token_hash = $1", [sha256(token)]);
+}
+
+export async function revokeSessionsForAccount(accountId: string, db: Db = pool()): Promise<void> {
+  await deleteAdminSessionsForAccount(accountId, db);
 }

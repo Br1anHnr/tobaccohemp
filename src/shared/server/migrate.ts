@@ -1,5 +1,6 @@
 import { pool } from "./database";
 import { seedCatalog, LOW_STOCK_AT } from "./seed";
+import { bootstrapAdminAccount } from "@/modules/auth";
 
 interface Migration {
   id: string;
@@ -188,6 +189,31 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS order_status_history_order_idx ON order_status_history (order_id, created_at ASC);
     `,
   },
+  {
+    id: "004_admin_accounts",
+    sql: `
+      CREATE TABLE IF NOT EXISTS admin_accounts (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'operator',
+        active BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMPTZ NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS admin_accounts_email_lower_idx ON admin_accounts (lower(email));
+
+      -- Sessions now reference a real account instead of a shared password. The
+      -- legacy password_hash column (used to detect password rotation) is
+      -- replaced by per-account revocation. Pre-account sessions are ephemeral
+      -- and safe to clear before the foreign key is installed.
+      DELETE FROM admin_sessions;
+      ALTER TABLE admin_sessions DROP COLUMN IF EXISTS password_hash;
+      ALTER TABLE admin_sessions ADD CONSTRAINT admin_sessions_account_fk
+        FOREIGN KEY (admin_id) REFERENCES admin_accounts(id) ON DELETE CASCADE;
+    `,
+  },
 ];
 
 let running: Promise<void> | undefined;
@@ -229,4 +255,5 @@ async function run(): Promise<void> {
   }
 
   await seedCatalog(db, LOW_STOCK_AT);
+  await bootstrapAdminAccount(db);
 }

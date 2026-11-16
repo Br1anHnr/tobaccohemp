@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authorize, sessionCookie, sessionUser } from "@/modules/auth";
+import type { AdminRole } from "@/shared/contracts/admin";
+import { requireRole, sessionCookie, sessionUser } from "@/modules/auth";
 import { ensureSchema } from "./migrate";
 import { AdminError } from "./validation";
 
@@ -18,7 +19,7 @@ export function isSecureRequest(request: NextRequest): boolean {
   return request.nextUrl.protocol === "https:" || forwarded === "https";
 }
 
-export function adminRoute(handler: AdminHandler, options: { public?: boolean; status?: number } = {}) {
+export function adminRoute(handler: AdminHandler, options: { public?: boolean; status?: number; role?: AdminRole } = {}) {
   return async (request: NextRequest) => {
     try {
       // The 503 lock stays by default outside development/test. It is released
@@ -36,7 +37,9 @@ export function adminRoute(handler: AdminHandler, options: { public?: boolean; s
         }
       }
       await ensureSchema();
-      if (!options.public) authorize(await sessionUser(request.cookies.get(sessionCookie)?.value));
+      // Mutations require `admin` by default; read-only routes may opt down to
+      // `operator` by passing `{ role: "operator" }`.
+      if (!options.public) requireRole(await sessionUser(request.cookies.get(sessionCookie)?.value), options.role ?? "admin");
       const data = await handler(request);
       const response = data instanceof NextResponse ? data : NextResponse.json({ data }, { status: options.status ?? 200 });
       response.headers.set("Cache-Control", "no-store");

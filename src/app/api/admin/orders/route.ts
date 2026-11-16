@@ -5,7 +5,7 @@ import { adminMutation } from "@/shared/server/admin-mutation";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export const GET = adminRoute(() => listOrders());
+export const GET = adminRoute(() => listOrders(), { role: "operator" });
 
 export const POST = adminRoute(
   async (request) => {

@@ -1,4 +1,22 @@
-export { authenticate, authorize, sessionUser, invalidateSession, sessionCookie, sessionSeconds } from "./infrastructure/admin-auth";
+export {
+  authenticate,
+  requireRole,
+  sessionUser,
+  invalidateSession,
+  revokeSessionsForAccount,
+  sessionCookie,
+  sessionSeconds,
+} from "./infrastructure/admin-auth";
+export {
+  listAdminAccounts,
+  createAdminAccount,
+  updateAdminAccount,
+  bootstrapAdminAccount,
+  toAdminAccount,
+  toAdminUser,
+  type AdminAccountRecord,
+} from "./infrastructure/admin-accounts";
+export { adminAccountInput, adminAccountPatch } from "./domain/admin-account-input";
 export {
   customerSessionCookie,
   customerSessionSeconds,
