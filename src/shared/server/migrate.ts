@@ -188,6 +188,25 @@ const migrations: Migration[] = [
       CREATE INDEX IF NOT EXISTS order_status_history_order_idx ON order_status_history (order_id, created_at ASC);
     `,
   },
+  {
+    id: "004_orders_consistency",
+    sql: `
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS idempotency_key TEXT;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS request_fingerprint TEXT;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS stock_status TEXT NOT NULL DEFAULT 'none';
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS stock_reserved_at TIMESTAMPTZ;
+      ALTER TABLE orders ADD COLUMN IF NOT EXISTS stock_released_at TIMESTAMPTZ;
+      CREATE UNIQUE INDEX IF NOT EXISTS orders_idempotency_key_idx
+        ON orders (idempotency_key)
+        WHERE idempotency_key IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS orders_pending_expires_idx
+        ON orders (status, expires_at)
+        WHERE status = 'pending_payment' AND expires_at IS NOT NULL;
+
+      ALTER TABLE inventory DROP CONSTRAINT IF EXISTS inventory_quantity_non_negative_chk;
+      ALTER TABLE inventory ADD CONSTRAINT inventory_quantity_non_negative_chk CHECK (quantity >= 0);
+    `,
+  },
 ];
 
 let running: Promise<void> | undefined;

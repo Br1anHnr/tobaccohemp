@@ -1,4 +1,4 @@
-import { findProduct } from "@/data/products";
+import { findProduct as findStaticProduct } from "@/data/products";
 import {
   calculateLineTotalCents,
   calculateOrderTotals,
@@ -11,8 +11,13 @@ import {
 } from "@/modules/orders/domain/eligibility";
 import { getPaymentProvider } from "@/modules/orders/domain/payment-provider";
 import type { OrderChannel, OrderPaymentMethod } from "@/shared/contracts/orders";
-import { cartCount, cartTotal } from "@/store/cart-store";
+import { cartCount } from "@/store/cart-store";
 import type { CartItem, DemoOrder, DemoOrderItemSnapshot } from "@/types/cart";
+import type { Product } from "@/types/product";
+
+function resolveProduct(id: string, catalogProducts?: readonly Product[]): Product | undefined {
+  return catalogProducts?.find((p) => p.id === id) ?? findStaticProduct(id);
+}
 
 export const checkoutFields = [
   { name: "name", label: "Nome completo", autoComplete: "name" },
@@ -49,10 +54,13 @@ export function validateCheckout(data: FormData) {
   return errors;
 }
 
-export function evaluateCartEligibility(items: CartItem[]): OrderEligibilitySummary {
+export function evaluateCartEligibility(
+  items: CartItem[],
+  catalogProducts?: readonly Product[],
+): OrderEligibilitySummary {
   return evaluateOrderEligibility(
     items.map((item) => {
-      const product = findProduct(item.productId);
+      const product = resolveProduct(item.productId, catalogProducts);
       return {
         product: product
           ? {
@@ -75,9 +83,13 @@ export function evaluateCartEligibility(items: CartItem[]): OrderEligibilitySumm
 // Personal form data is intentionally never stored by this local demonstration.
 export function createDemoOrder(
   items: CartItem[],
-  options: { channel?: OrderChannel; paymentMethod?: OrderPaymentMethod } = {},
+  options: {
+    channel?: OrderChannel;
+    paymentMethod?: OrderPaymentMethod;
+    products?: readonly Product[];
+  } = {},
 ): DemoOrder {
-  const eligibility = evaluateCartEligibility(items);
+  const eligibility = evaluateCartEligibility(items, options.products);
   if (!eligibility.allowed) {
     throw new Error(eligibility.blockedReasons[0] ?? "Itens não elegíveis para pedido.");
   }
@@ -90,7 +102,7 @@ export function createDemoOrder(
       : "pix";
 
   const snapshots: DemoOrderItemSnapshot[] = items.map((item) => {
-    const product = findProduct(item.productId)!;
+    const product = resolveProduct(item.productId, options.products)!;
     const unitPriceCents = Math.round(product.price * 100);
     return {
       productId: product.id,
@@ -121,7 +133,7 @@ export function createDemoOrder(
 
   return {
     number,
-    total: cartTotal(items),
+    total: totals.totalCents / 100,
     count: cartCount(items),
     createdAt,
     status: intent.status,

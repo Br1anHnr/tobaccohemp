@@ -23,6 +23,14 @@ export type PaymentProviderId = (typeof PAYMENT_PROVIDER_IDS)[number];
 export type OrderEligibilityStatus = "eligible_demo" | "blocked";
 export type OrderActorType = "system" | "admin" | "customer" | "provider_webhook";
 
+export const ORDER_STOCK_STATUSES = [
+  "none",
+  "reserved",
+  "committed",
+  "released",
+] as const;
+export type OrderStockStatus = (typeof ORDER_STOCK_STATUSES)[number];
+
 export interface OrderItem {
   id: string;
   orderId: string;
@@ -45,6 +53,7 @@ export interface OrderStatusHistoryEntry {
   reason: string;
   actorType: OrderActorType;
   actorId: string | null;
+  metadata?: Record<string, unknown>;
   createdAt: string;
 }
 
@@ -66,6 +75,9 @@ export interface Order {
   currency: "BRL";
   isDemo: boolean;
   eligibilityStatus: OrderEligibilityStatus;
+  stockStatus?: OrderStockStatus;
+  stockReservedAt?: string | null;
+  stockReleasedAt?: string | null;
   expiresAt: string | null;
   createdAt: string;
   updatedAt: string;
@@ -89,6 +101,7 @@ export interface CreateOrderInput {
   paymentMethod: OrderPaymentMethod;
   shippingCents?: number;
   discountCents?: number;
+  idempotencyKey?: string;
   items: CreateOrderItemInput[];
 }
 
