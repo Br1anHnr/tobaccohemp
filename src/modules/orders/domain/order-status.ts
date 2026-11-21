@@ -1,4 +1,9 @@
-import type { OrderChannel, OrderPaymentMethod, OrderStatus } from "@/shared/contracts/orders";
+import type {
+  OrderChannel,
+  OrderPaymentMethod,
+  OrderStatus,
+  OrderStockStatus,
+} from "@/shared/contracts/orders";
 import { AdminError } from "@/shared/server/validation";
 
 export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
@@ -8,6 +13,13 @@ export const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
   expired: "Expirado",
   canceled: "Cancelado",
   refunded: "Estornado",
+};
+
+export const ORDER_STOCK_STATUS_LABEL: Record<OrderStockStatus, string> = {
+  none: "Sem reserva de estoque",
+  reserved: "Estoque reservado",
+  committed: "Estoque baixado (confirmado)",
+  released: "Estoque devolvido",
 };
 
 export const ORDER_CHANNEL_LABEL: Record<OrderChannel, string> = {

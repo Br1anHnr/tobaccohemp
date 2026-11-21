@@ -1,5 +1,6 @@
 export {
   ORDER_STATUS_LABEL,
+  ORDER_STOCK_STATUS_LABEL,
   ORDER_CHANNEL_LABEL,
   ORDER_PAYMENT_METHOD_LABEL,
   ALLOWED_ORDER_TRANSITIONS,
@@ -35,7 +36,10 @@ export { createOrderInput, updateOrderStatusInput } from "./domain/order-input";
 export {
   listOrders,
   getOrderDetail,
+  listOrderHistory,
   createOrder,
   transitionOrderStatus,
+  expireOverdueOrders,
   summarizeOrders,
+  type OrderHistoryFeedEntry,
 } from "./infrastructure/orders";

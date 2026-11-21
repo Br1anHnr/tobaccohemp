@@ -32,6 +32,31 @@ function parseOrderItem(value: unknown): CreateOrderItemInput {
   return { productId, quantity, variant };
 }
 
+function parseIdempotencyKey(value: unknown): string | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const key = textInput(value, 128);
+  if (!/^[A-Za-z0-9._:-]+$/.test(key)) invalid();
+  return key;
+}
+
+function mergeOrderItems(rawItems: CreateOrderItemInput[]): CreateOrderItemInput[] {
+  const merged = new Map<string, CreateOrderItemInput>();
+  for (const item of rawItems) {
+    const key = `${item.productId}\u0000${item.variant ?? ""}`;
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(key, { ...item });
+      continue;
+    }
+    const nextQty = existing.quantity + item.quantity;
+    if (nextQty > 99) {
+      throw new AdminError(422, "VALIDATION", "A quantidade por item deve estar entre 1 e 99.");
+    }
+    existing.quantity = nextQty;
+  }
+  return Array.from(merged.values());
+}
+
 export function createOrderInput(value: unknown): CreateOrderInput {
   const input = optionalObject(value, [
     "customerAccountId",
@@ -40,6 +65,7 @@ export function createOrderInput(value: unknown): CreateOrderInput {
     "paymentMethod",
     "shippingCents",
     "discountCents",
+    "idempotencyKey",
     "items",
   ]);
 
@@ -56,7 +82,7 @@ export function createOrderInput(value: unknown): CreateOrderInput {
     throw new AdminError(422, "VALIDATION", "Informe entre 1 e 50 itens para o pedido.");
   }
 
-  const items = input.items.map(parseOrderItem);
+  const items = mergeOrderItems(input.items.map(parseOrderItem));
   const customerAccountId =
     input.customerAccountId === undefined || input.customerAccountId === null
       ? null
@@ -67,6 +93,7 @@ export function createOrderInput(value: unknown): CreateOrderInput {
       : textInput(input.customerLabel, 120);
   const shippingCents = input.shippingCents === undefined ? 0 : integerInput(input.shippingCents);
   const discountCents = input.discountCents === undefined ? 0 : integerInput(input.discountCents);
+  const idempotencyKey = parseIdempotencyKey(input.idempotencyKey);
 
   return {
     customerAccountId,
@@ -75,6 +102,7 @@ export function createOrderInput(value: unknown): CreateOrderInput {
     paymentMethod: input.paymentMethod as OrderPaymentMethod,
     shippingCents,
     discountCents,
+    ...(idempotencyKey ? { idempotencyKey } : {}),
     items,
   };
 }

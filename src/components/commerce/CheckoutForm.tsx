@@ -38,7 +38,7 @@ export function CheckoutForm() {
   if (!items.length)
     return <EmptyState title="Escolha seus essenciais primeiro." />;
 
-  const eligibility = evaluateCartEligibility(items);
+  const eligibility = evaluateCartEligibility(items, products);
 
   return (
     <div className="commerce-columns checkout-columns">
@@ -64,7 +64,11 @@ export function CheckoutForm() {
           lock.current = true;
           setSubmitting(true);
           try {
-            const order = createDemoOrder(items, { channel, paymentMethod });
+            const order = createDemoOrder(items, {
+              channel,
+              paymentMethod,
+              products,
+            });
             setOrder(order);
             try {
               sessionStorage.setItem(STORAGE.order, JSON.stringify(order));

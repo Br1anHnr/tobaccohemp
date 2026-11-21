@@ -1,12 +1,20 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { createAdminOrder, fetchProducts } from "@/lib/admin-service";
 import { currency } from "@/lib/currency";
+import { ALLOWED_ACCESSORY_CATEGORIES } from "@/modules/orders/domain/eligibility";
 import type { AdminProduct } from "@/types/admin";
 import type { OrderChannel, OrderPaymentMethod } from "@/shared/contracts/orders";
 import { Modal } from "@/components/ui/Modal";
 import { FormField } from "@/components/ui/FormField";
+
+function newIdempotencyKey(): string {
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return `admin-order-${globalThis.crypto.randomUUID()}`;
+  }
+  return `admin-order-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 export function OrderFormModal({
   open,
@@ -25,14 +33,28 @@ export function OrderFormModal({
   const [paymentMethod, setPaymentMethod] = useState<OrderPaymentMethod>("pix");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  const idempotencyKeyRef = useRef("");
+
+  const resetIdempotencyKey = () => {
+    idempotencyKeyRef.current = newIdempotencyKey();
+  };
 
   useEffect(() => {
     if (!open) return;
+    if (!idempotencyKeyRef.current) {
+      idempotencyKeyRef.current = newIdempotencyKey();
+    }
     let active = true;
     fetchProducts()
       .then((list) => {
         if (!active) return;
-        const available = list.filter((p) => p.active !== false && p.stock > 0);
+        const available = list.filter(
+          (p) =>
+            !p.archived &&
+            p.active !== false &&
+            p.stock > 0 &&
+            Boolean(p.categorySlug && ALLOWED_ACCESSORY_CATEGORIES.has(p.categorySlug)),
+        );
         setProducts(available);
         if (available.length && !productId) {
           setProductId(available[0].id);
@@ -67,8 +89,10 @@ export function OrderFormModal({
         customerLabel: customerLabel.trim() || "Pedido demonstrativo",
         channel,
         paymentMethod,
+        idempotencyKey: idempotencyKeyRef.current || newIdempotencyKey(),
         items: [{ productId, quantity: qty }],
       });
+      resetIdempotencyKey();
       setCustomerLabel("");
       setQuantity("1");
       onCreated();
@@ -97,7 +121,10 @@ export function OrderFormModal({
           <select
             id="order-product"
             value={productId}
-            onChange={(event) => setProductId(event.target.value)}
+            onChange={(event) => {
+              resetIdempotencyKey();
+              setProductId(event.target.value);
+            }}
             required
           >
             {products.length === 0 ? (
@@ -119,7 +146,10 @@ export function OrderFormModal({
           min={1}
           max={99}
           value={quantity}
-          onChange={(event) => setQuantity(event.target.value)}
+          onChange={(event) => {
+            resetIdempotencyKey();
+            setQuantity(event.target.value);
+          }}
           required
         />
 
@@ -128,7 +158,10 @@ export function OrderFormModal({
           label="Identificação do pedido (opcional)"
           placeholder="Ex.: Teste Pix sandbox"
           value={customerLabel}
-          onChange={(event) => setCustomerLabel(event.target.value)}
+          onChange={(event) => {
+            resetIdempotencyKey();
+            setCustomerLabel(event.target.value);
+          }}
         />
 
         <div className="field">
@@ -136,7 +169,10 @@ export function OrderFormModal({
           <select
             id="order-channel"
             value={channel}
-            onChange={(event) => setChannel(event.target.value as OrderChannel)}
+            onChange={(event) => {
+              resetIdempotencyKey();
+              setChannel(event.target.value as OrderChannel);
+            }}
           >
             <option value="site">Checkout no site (demo)</option>
             <option value="whatsapp_link">Link via WhatsApp (demo)</option>
@@ -148,9 +184,10 @@ export function OrderFormModal({
           <select
             id="order-method"
             value={paymentMethod}
-            onChange={(event) =>
-              setPaymentMethod(event.target.value as OrderPaymentMethod)
-            }
+            onChange={(event) => {
+              resetIdempotencyKey();
+              setPaymentMethod(event.target.value as OrderPaymentMethod);
+            }}
           >
             <option value="pix">Pix (demo)</option>
             <option value="card">Cartão hospedado (demo)</option>

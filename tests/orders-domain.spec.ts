@@ -63,6 +63,13 @@ test("eligibility blocks non-eligible or regulated items and keeps real payments
     evaluateItemEligibility({ ...validAccessory, active: false }, 1).eligibleForDemo,
   ).toBe(false);
   expect(
+    evaluateItemEligibility({ ...validAccessory, archived: true }, 1).eligibleForDemo,
+  ).toBe(false);
+  expect(
+    evaluateItemEligibility({ ...validAccessory, categorySlug: null }, 1)
+      .eligibleForDemo,
+  ).toBe(false);
+  expect(
     evaluateItemEligibility({ ...validAccessory, stock: 1 }, 2).eligibleForDemo,
   ).toBe(false);
   expect(
@@ -87,6 +94,13 @@ test("eligibility blocks non-eligible or regulated items and keeps real payments
   expect(summary.allowed).toBe(false);
   expect(summary.eligibilityStatus).toBe("blocked");
   expect(summary.blockedReasons.length).toBe(1);
+
+  const multiVariantOverStock = evaluateOrderEligibility([
+    { product: validAccessory, quantity: 3 },
+    { product: validAccessory, quantity: 3 },
+  ]);
+  expect(multiVariantOverStock.allowed).toBe(false);
+  expect(multiVariantOverStock.blockedReasons[0]).toContain("excede o estoque disponível");
 });
 
 test("order calculations use integer BRL cents and validate invariants", () => {
@@ -164,11 +178,35 @@ test("order input parsers validate payloads strictly", () => {
     channel: "site",
     paymentMethod: "pix",
     customerLabel: "Teste Sandbox",
-    items: [{ productId: "case-01", quantity: 2, variant: "Preto" }],
+    idempotencyKey: "req-123_abc:1",
+    items: [
+      { productId: "case-01", quantity: 2, variant: "Preto" },
+      { productId: "case-01", quantity: 1, variant: "Preto" },
+    ],
   });
   expect(parsed.items).toHaveLength(1);
+  expect(parsed.items[0].quantity).toBe(3);
+  expect(parsed.idempotencyKey).toBe("req-123_abc:1");
   expect(parsed.shippingCents).toBe(0);
 
+  expect(() =>
+    createOrderInput({
+      channel: "site",
+      paymentMethod: "pix",
+      idempotencyKey: "invalid key with spaces!",
+      items: [{ productId: "case-01", quantity: 1 }],
+    }),
+  ).toThrow();
+  expect(() =>
+    createOrderInput({
+      channel: "site",
+      paymentMethod: "pix",
+      items: [
+        { productId: "case-01", quantity: 60, variant: "Preto" },
+        { productId: "case-01", quantity: 50, variant: "Preto" },
+      ],
+    }),
+  ).toThrow();
   expect(() =>
     createOrderInput({ channel: "site", paymentMethod: "pix", items: [] }),
   ).toThrow();

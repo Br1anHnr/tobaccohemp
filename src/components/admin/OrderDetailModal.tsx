@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { currency } from "@/lib/currency";
 import { fetchOrderDetail, updateOrderStatus } from "@/lib/admin-service";
 import { useResource } from "@/lib/use-resource";
@@ -9,6 +9,7 @@ import {
   ORDER_CHANNEL_LABEL,
   ORDER_PAYMENT_METHOD_LABEL,
   ORDER_STATUS_LABEL,
+  ORDER_STOCK_STATUS_LABEL,
 } from "@/modules/orders/domain/order-status";
 import type { OrderDetail, OrderStatus } from "@/shared/contracts/orders";
 import { Modal } from "@/components/ui/Modal";
@@ -26,6 +27,12 @@ const ACTOR_LABEL: Record<string, string> = {
   admin: "Administrador",
   customer: "Cliente",
   provider_webhook: "Provedor",
+};
+
+const STOCK_ACTION_LABEL: Record<string, string> = {
+  reserved: "Estoque reservado",
+  committed: "Estoque baixado",
+  released: "Estoque devolvido",
 };
 
 function OrderDetailBody({
@@ -48,8 +55,22 @@ function OrderDetailBody({
   const [reason, setReason] = useState("");
   const [mutating, setMutating] = useState(false);
   const [mutationError, setMutationError] = useState("");
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const detail = override ?? fetched;
+  const expiresAtMs =
+    detail && detail.status === "pending_payment" && detail.expiresAt
+      ? new Date(detail.expiresAt).getTime()
+      : null;
+  const isOverdue = expiresAtMs !== null && expiresAtMs <= nowMs;
+
+  useEffect(() => {
+    if (expiresAtMs === null) return;
+    const remaining = expiresAtMs - nowMs;
+    if (remaining <= 0) return;
+    const timer = setTimeout(() => setNowMs(Date.now()), Math.min(remaining + 50, 60_000));
+    return () => clearTimeout(timer);
+  }, [expiresAtMs, nowMs]);
 
   if (status === "loading" && !detail) return <LoadingState />;
   if (status === "error" || !detail) return <ErrorState onRetry={retry} />;
@@ -125,6 +146,12 @@ function OrderDetailBody({
               : "Bloqueado"}
           </dd>
         </div>
+        {detail.stockStatus && (
+          <div>
+            <dt>Situação do estoque</dt>
+            <dd>{ORDER_STOCK_STATUS_LABEL[detail.stockStatus]}</dd>
+          </div>
+        )}
       </dl>
 
       <section className="order-detail-section" aria-label="Itens do pedido">
@@ -181,6 +208,11 @@ function OrderDetailBody({
               value={reason}
               onChange={(event) => setReason(event.target.value)}
             />
+            {isOverdue && (
+              <p role="status" className="cell-sub">
+                Prazo de pagamento expirado. Marque como Expirado ou Cancelado para liberar o estoque reservado.
+              </p>
+            )}
             {mutationError && <p role="alert">{mutationError}</p>}
             <div className="order-actions-row">
               {nextStatuses.map((target) => (
@@ -188,7 +220,7 @@ function OrderDetailBody({
                   key={target}
                   type="button"
                   className="button button-secondary"
-                  disabled={mutating}
+                  disabled={mutating || (isOverdue && target === "paid")}
                   onClick={() => void handleTransition(target)}
                 >
                   Marcar como {ORDER_STATUS_LABEL[target]}
@@ -220,6 +252,11 @@ function OrderDetailBody({
               <p>{entry.reason}</p>
               <span className="cell-sub">
                 Origem: {ACTOR_LABEL[entry.actorType] ?? entry.actorType}
+                {entry.actorId ? ` · ${entry.actorId}` : ""}
+                {typeof entry.metadata?.stockAction === "string" &&
+                STOCK_ACTION_LABEL[entry.metadata.stockAction]
+                  ? ` · ${STOCK_ACTION_LABEL[entry.metadata.stockAction]}`
+                  : ""}
               </span>
             </li>
           ))}

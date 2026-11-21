@@ -42,8 +42,9 @@ export interface EligibilitySubject {
   id: string;
   name: string;
   sku?: string;
-  categorySlug?: string;
+  categorySlug?: string | null;
   active?: boolean;
+  archived?: boolean;
   stock?: number;
   tags?: string[];
 }
@@ -71,6 +72,13 @@ export function evaluateItemEligibility(
       reason: "Produto não localizado no catálogo autorizado.",
     };
   }
+  if (product.archived === true) {
+    return {
+      eligibleForDemo: false,
+      eligibleForRealCharge: false,
+      reason: `O produto "${product.name}" está arquivado.`,
+    };
+  }
   if (product.active === false) {
     return {
       eligibleForDemo: false,
@@ -93,11 +101,13 @@ export function evaluateItemEligibility(
     };
   }
 
-  if (product.categorySlug && !ALLOWED_ACCESSORY_CATEGORIES.has(product.categorySlug)) {
+  if (!product.categorySlug || !ALLOWED_ACCESSORY_CATEGORIES.has(product.categorySlug)) {
     return {
       eligibleForDemo: false,
       eligibleForRealCharge: false,
-      reason: `Categoria "${product.categorySlug}" não elegível para pedidos online.`,
+      reason: product.categorySlug
+        ? `Categoria "${product.categorySlug}" não elegível para pedidos online.`
+        : `O produto "${product.name}" não possui categoria elegível classificada.`,
     };
   }
 
@@ -131,10 +141,28 @@ export function evaluateOrderEligibility(
   }
 
   const blockedReasons: string[] = [];
+  const totalsByProduct = new Map<string, { product: EligibilitySubject; totalQuantity: number }>();
+
   for (const entry of entries) {
     const check = evaluateItemEligibility(entry.product, entry.quantity);
     if (!check.eligibleForDemo && check.reason) {
       blockedReasons.push(check.reason);
+      continue;
+    }
+    if (entry.product) {
+      const current = totalsByProduct.get(entry.product.id);
+      totalsByProduct.set(entry.product.id, {
+        product: entry.product,
+        totalQuantity: (current?.totalQuantity ?? 0) + entry.quantity,
+      });
+    }
+  }
+
+  for (const { product, totalQuantity } of totalsByProduct.values()) {
+    if (typeof product.stock === "number" && totalQuantity > product.stock) {
+      blockedReasons.push(
+        `Quantidade total solicitada de "${product.name}" (${totalQuantity}) excede o estoque disponível (${product.stock}).`,
+      );
     }
   }
 
