@@ -9,4 +9,4 @@ export const GET = adminRoute((request: NextRequest) => {
   const rawLimit = request.nextUrl.searchParams.get("limit");
   const parsed = rawLimit ? Number.parseInt(rawLimit, 10) : 50;
   return listOrderHistory(Number.isSafeInteger(parsed) ? parsed : 50);
-});
+}, { role: "operator" });

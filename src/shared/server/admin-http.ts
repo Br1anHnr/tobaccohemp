@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import type { AdminRole } from "@/shared/contracts/admin";
+import type { AdminRole, AdminUser } from "@/shared/contracts/admin";
 import { requireRole, sessionCookie, sessionUser } from "@/modules/auth";
 import { ensureSchema } from "./migrate";
 import { AdminError } from "./validation";
 
-export type AdminHandler = (request: NextRequest) => unknown | Promise<unknown>;
+export type AdminHandler = (request: NextRequest, user: AdminUser | null) => unknown | Promise<unknown>;
 
 const developmentEnvs = new Set(["development", "test"]);
 
@@ -39,8 +39,8 @@ export function adminRoute(handler: AdminHandler, options: { public?: boolean; s
       await ensureSchema();
       // Mutations require `admin` by default; read-only routes may opt down to
       // `operator` by passing `{ role: "operator" }`.
-      if (!options.public) requireRole(await sessionUser(request.cookies.get(sessionCookie)?.value), options.role ?? "admin");
-      const data = await handler(request);
+      const user = options.public ? null : requireRole(await sessionUser(request.cookies.get(sessionCookie)?.value), options.role ?? "admin");
+      const data = await handler(request, user);
       const response = data instanceof NextResponse ? data : NextResponse.json({ data }, { status: options.status ?? 200 });
       response.headers.set("Cache-Control", "no-store");
       response.headers.set("Vary", "Cookie");

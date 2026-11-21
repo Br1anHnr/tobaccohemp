@@ -26,6 +26,16 @@ test("contas individuais com hash, RBAC e sessões revogáveis", async ({ page, 
   const operatorPassword = "operadorSeguro123";
 
   try {
+    // All newly integrated order endpoints enforce authorization before input or lookup.
+    for (const path of ["/api/admin/orders", "/api/admin/orders/missing", "/api/admin/orders/history", "/api/admin/accounts"]) {
+      expect((await page.request.get(path)).status()).toBe(401);
+    }
+    for (const path of ["/api/admin/orders", "/api/admin/orders/expire"]) {
+      expect((await page.request.post(path, { headers: { Origin: ORIGIN }, data: {} })).status()).toBe(401);
+    }
+    expect((await page.request.patch("/api/admin/orders/missing", {
+      headers: { Origin: ORIGIN }, data: { status: "paid" },
+    })).status()).toBe(401);
     // Bootstrap admin logs in through the UI contract.
     const adminLogin = await page.request.post("/api/admin/auth/login", {
       headers: { Origin: ORIGIN },
@@ -62,6 +72,19 @@ test("contas individuais com hash, RBAC e sessões revogáveis", async ({ page, 
     expect((await operatorContext.request.get("/api/admin/dashboard")).status()).toBe(200);
     expect((await operatorContext.request.get("/api/admin/products")).status()).toBe(200);
     expect((await operatorContext.request.get("/api/admin/orders")).status()).toBe(200);
+    expect((await operatorContext.request.get("/api/admin/orders/history")).status()).toBe(200);
+    expect((await operatorContext.request.get("/api/admin/orders/missing")).status()).toBe(404);
+    for (const path of ["/api/admin/orders", "/api/admin/orders/expire"]) {
+      expect((await operatorContext.request.post(path, {
+        headers: { Origin: ORIGIN }, data: {},
+      })).status()).toBe(403);
+    }
+    expect((await operatorContext.request.patch("/api/admin/orders/missing", {
+      headers: { Origin: ORIGIN }, data: { status: "paid" },
+    })).status()).toBe(403);
+    expect((await page.request.post("/api/admin/orders/expire", {
+      headers: { Origin: "https://invalid.example.test" },
+    })).status()).toBe(403);
 
     // Mutations and account management stay admin-only.
     expect((await operatorContext.request.post("/api/admin/products", {

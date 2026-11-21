@@ -63,8 +63,8 @@ test("cadastro, ciclo de imagem (upload/leitura/atualização/remoção) e refle
     expect(uploaded.status()).toBe(201);
     const image = (await uploaded.json()).data;
     expect(image.id).toBeTruthy();
-    // With R2 configured, the stored object is served from the public URL.
-    expect(image.url).toMatch(/^https:\/\//);
+    // Exercise the configured adapter; isolated runs use local storage without R2 credentials.
+    expect(image.url).toMatch(process.env.R2_PUBLIC_URL ? /^https:\/\// : /^\/uploads\/products\//);
 
     // Leitura pública do objeto recém-enviado.
     const read = await page.request.get(image.url);

@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export const GET = adminRoute(() => listOrders(), { role: "operator" });
 
 export const POST = adminRoute(
-  async (request) => {
+  async (request, user) => {
     const raw = await jsonInput(request);
     const headerKey = request.headers.get("idempotency-key")?.trim();
     let payload = raw;
@@ -29,7 +29,7 @@ export const POST = adminRoute(
       payload = { ...record, idempotencyKey: record.idempotencyKey || headerKey };
     }
     return adminMutation((db) =>
-      createOrder(payload, { actorType: "admin", actorId: "local-admin" }, db),
+      createOrder(payload, { actorType: "admin", actorId: user?.id }, db),
     );
   },
   { status: 201 },

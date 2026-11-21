@@ -26,6 +26,7 @@ async function login(page: Page) {
     data: { email: "admin@example.test", password },
   });
   expect(response.status()).toBe(200);
+  return String((await response.json()).data.id);
 }
 
 async function getInventoryQuantity(productId: string): Promise<number> {
@@ -78,7 +79,7 @@ test("núcleo de pedidos garante consistência de estoque, idempotência, transi
   const createdProductIds: string[] = [];
 
   try {
-    await login(page);
+    const adminId = await login(page);
 
     // 1. Cria produto elegível (cases) com estoque inicial 3.
     const eligibleRes = await page.request.post("/api/admin/products", {
@@ -365,7 +366,7 @@ test("núcleo de pedidos garante consistência de estoque, idempotência, transi
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText("Estoque devolvido");
     await expect(dialog).toContainText("Estorno sandbox");
-    await expect(dialog).toContainText("local-admin");
+    await expect(dialog).toContainText(adminId);
     await dialog.getByRole("button", { name: "Fechar" }).click();
   } finally {
     await cleanupFixtures(createdOrderIds, createdProductIds);

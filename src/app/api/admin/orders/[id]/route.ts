@@ -20,11 +20,11 @@ export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ id: string }> },
 ) {
-  return adminRoute(async (req) => {
+  return adminRoute(async (req, user) => {
     const { id } = await context.params;
     const input = await jsonInput(req);
     return adminMutation((db) =>
-      transitionOrderStatus(id, input, { actorType: "admin", actorId: "local-admin" }, db),
+      transitionOrderStatus(id, input, { actorType: "admin", actorId: user?.id }, db),
     );
   })(request);
 }
