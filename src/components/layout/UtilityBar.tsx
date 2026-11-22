@@ -7,13 +7,13 @@ export function UtilityBar() {
       <Container>
         <span>Acessórios para acompanhar sua rotina.</span>
         <div>
-          <Link href="/contato">
+          <Link href="/contato" prefetch={false}>
             <MapPin size={12} /> Loja física
           </Link>
-          <Link href="/loja?novidades=1">
+          <Link href="/loja?novidades=1" prefetch={false}>
             <Sparkles size={12} /> Novidades
           </Link>
-          <Link href="/contato">
+          <Link href="/contato" prefetch={false}>
             <MessageCircle size={12} /> Atendimento
           </Link>
         </div>

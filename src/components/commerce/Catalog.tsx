@@ -1,13 +1,15 @@
 "use client";
 import { startTransition, useMemo, useOptimistic, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { SlidersHorizontal, X } from "lucide-react";
-import { products } from "@/data/products";
-import { categories } from "@/data/categories";
+import { Search, SlidersHorizontal, X } from "lucide-react";
+import { useCatalog } from "@/store/catalog-store";
 import { currency } from "@/lib/currency";
+import { normalize } from "@/lib/utils";
 import { ProductGrid } from "./ProductGrid";
-const brands = [...new Set(products.map((p) => p.brand))];
 export function Catalog({ categorySlug }: { categorySlug?: string }) {
+  const products = useCatalog((s) => s.products);
+  const categories = useCatalog((s) => s.categories);
+  const brands = [...new Set(products.map((p) => p.brand))];
   const router = useRouter();
   const searchParams = useSearchParams();
   const [optimisticQuery, setOptimisticQuery] = useOptimistic(
@@ -19,10 +21,16 @@ export function Catalog({ categorySlug }: { categorySlug?: string }) {
   const brand = params.get("marca") ?? "";
   const onlyNew = params.get("novidades") === "1";
   const sort = params.get("ordem") ?? "destaques";
-  const requestedMax = Number(params.get("preco") ?? 200);
+  const query = params.get("q") ?? "";
+  const needle = normalize(query.trim());
+  const catalogMaxPrice = useMemo(
+    () => Math.max(200, Math.ceil(Math.max(0, ...products.map((p) => p.price)) / 10) * 10),
+    [products],
+  );
+  const requestedMax = Number(params.get("preco") ?? catalogMaxPrice);
   const maxPrice = Number.isFinite(requestedMax)
-    ? Math.max(0, Math.min(200, requestedMax))
-    : 200;
+    ? Math.max(0, Math.min(catalogMaxPrice, requestedMax))
+    : catalogMaxPrice;
   const change = (key: string, value: string) => {
     const next = new URLSearchParams(params.toString());
     if (value) next.set(key, value);
@@ -35,6 +43,62 @@ export function Catalog({ categorySlug }: { categorySlug?: string }) {
       );
     });
   };
+  const clearAll = () => {
+    startTransition(() => {
+      setOptimisticQuery("");
+      router.replace(categorySlug ? `/categoria/${categorySlug}` : "/loja", {
+        scroll: false,
+      });
+    });
+  };
+  const activeFilters = [
+    ...(!categorySlug && category
+      ? [
+          {
+            key: "categoria",
+            label: `Categoria: ${categories.find((c) => c.slug === category)?.name ?? category}`,
+            onClear: () => change("categoria", ""),
+          },
+        ]
+      : []),
+    ...(brand
+      ? [
+          {
+            key: "marca",
+            label: `Coleção: ${brand}`,
+            onClear: () => change("marca", ""),
+          },
+        ]
+      : []),
+    ...(onlyNew
+      ? [
+          {
+            key: "novidades",
+            label: "Apenas novidades",
+            onClear: () => change("novidades", ""),
+          },
+        ]
+      : []),
+    ...(maxPrice < catalogMaxPrice
+      ? [
+          {
+            key: "preco",
+            label: `Até ${currency(maxPrice)}`,
+            onClear: () => change("preco", ""),
+          },
+        ]
+      : []),
+    ...(query.trim()
+      ? [
+          {
+            key: "q",
+            label: `Busca: “${query.trim()}”`,
+            onClear: () => change("q", ""),
+          },
+        ]
+      : []),
+  ];
+  const sidebarFilterCount = activeFilters.filter((f) => f.key !== "q").length;
   const visible = useMemo(
     () =>
       products
@@ -43,7 +107,11 @@ export function Catalog({ categorySlug }: { categorySlug?: string }) {
             (!category || p.categorySlug === category) &&
             (!brand || p.brand === brand) &&
             (!onlyNew || p.isNew) &&
-            p.price <= maxPrice,
+            p.price <= maxPrice &&
+            (!needle ||
+              normalize(
+                [p.name, p.brand, p.category, p.description, ...p.tags].join(" "),
+              ).includes(needle)),
         )
         .sort((a, b) =>
           sort === "menor"
@@ -54,21 +122,52 @@ export function Catalog({ categorySlug }: { categorySlug?: string }) {
                 ? Number(b.isNew) - Number(a.isNew)
                 : Number(b.isFeatured) - Number(a.isFeatured),
         ),
-    [category, brand, onlyNew, maxPrice, sort],
+    [category, brand, onlyNew, maxPrice, sort, needle, products],
   );
   return (
     <div className="catalog">
       <div className="catalog-toolbar">
+        <form
+          role="search"
+          className="catalog-search"
+          onSubmit={(e) => e.preventDefault()}
+        >
+          <Search size={16} aria-hidden="true" />
+          <label htmlFor="catalog-q" className="sr-only">
+            Buscar no catálogo
+          </label>
+          <input
+            id="catalog-q"
+            type="search"
+            placeholder="Buscar no catálogo"
+            value={query}
+            maxLength={80}
+            onChange={(e) => change("q", e.target.value)}
+          />
+          {query && (
+            <button
+              type="button"
+              aria-label="Limpar busca"
+              onClick={() => change("q", "")}
+            >
+              <X size={15} />
+            </button>
+          )}
+        </form>
         <span role="status">
           {visible.length} {visible.length === 1 ? "produto" : "produtos"}
         </span>
         <button
+          type="button"
           className="filter-toggle button button-secondary"
           aria-expanded={filtersOpen}
           aria-controls="catalog-filters"
           onClick={() => setFiltersOpen(!filtersOpen)}
         >
-          <SlidersHorizontal size={16} /> Filtros
+          <SlidersHorizontal size={16} aria-hidden="true" /> Filtros
+          {sidebarFilterCount > 0 && (
+            <span className="filter-count">{sidebarFilterCount}</span>
+          )}
         </button>
         <label className="sort-label">
           Ordenar por{" "}
@@ -84,6 +183,26 @@ export function Catalog({ categorySlug }: { categorySlug?: string }) {
           </select>
         </label>
       </div>
+      {activeFilters.length > 0 && (
+        <div className="active-filters" aria-label="Filtros ativos">
+          {activeFilters.map((filter) => (
+            <button
+              key={filter.key}
+              type="button"
+              className="filter-chip"
+              onClick={filter.onClear}
+            >
+              <span>{filter.label}</span>
+              <X size={13} aria-hidden="true" />
+            </button>
+          ))}
+          {activeFilters.length > 1 && (
+            <button type="button" className="text-link" onClick={clearAll}>
+              Limpar tudo
+            </button>
+          )}
+        </div>
+      )}
       <div className="catalog-layout">
         <aside
           id="catalog-filters"
@@ -135,22 +254,14 @@ export function Catalog({ categorySlug }: { categorySlug?: string }) {
             <input
               type="range"
               min="0"
-              max="200"
+              max={catalogMaxPrice}
               step="5"
               value={maxPrice}
               onChange={(e) => change("preco", e.target.value)}
             />
           </label>
-          <button
-            className="text-link"
-            onClick={() =>
-              router.replace(
-                categorySlug ? `/categoria/${categorySlug}` : "/loja",
-                { scroll: false },
-              )
-            }
-          >
-            <X size={14} /> Limpar filtros
+          <button type="button" className="text-link" onClick={clearAll}>
+            <X size={14} aria-hidden="true" /> Limpar filtros
           </button>
         </aside>
         <div>
@@ -158,16 +269,20 @@ export function Catalog({ categorySlug }: { categorySlug?: string }) {
             <ProductGrid products={visible} />
           ) : (
             <div className="empty-state compact">
-              <h2>Nenhum produto nesta seleção.</h2>
-              <p>Experimente outra categoria ou ajuste os filtros.</p>
+              <h2>
+                {query
+                  ? `Nenhum resultado para “${query}”.`
+                  : "Nenhum produto nesta seleção."}
+              </h2>
+              <p>
+                {query
+                  ? "Revise a grafia ou tente termos como “case” ou “bandeja”."
+                  : "Experimente outra categoria ou ajuste os filtros."}
+              </p>
               <button
+                type="button"
                 className="button button-secondary"
-                onClick={() =>
-                  router.replace(
-                    categorySlug ? `/categoria/${categorySlug}` : "/loja",
-                    { scroll: false },
-                  )
-                }
+                onClick={clearAll}
               >
                 Limpar filtros
               </button>

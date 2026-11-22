@@ -1,0 +1,82 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import {
+  ArrowLeft,
+  LayoutDashboard,
+  Package,
+  ShoppingCart,
+  Tags,
+  Users,
+} from "lucide-react";
+import { Logo } from "@/components/layout/Logo";
+
+const items = [
+  { label: "Visão geral", href: "/admin", icon: LayoutDashboard },
+  { label: "Clientes", href: "/admin/clientes", icon: Users },
+  { label: "Produtos & estoque", href: "/admin/produtos", icon: Package },
+  { label: "Categorias", href: "/admin/categorias", icon: Tags },
+];
+
+export function AdminSidebar({
+  open,
+  onClose,
+  sandboxEnabled = false,
+}: {
+  open: boolean;
+  onClose: () => void;
+  sandboxEnabled?: boolean;
+}) {
+  const pathname = usePathname();
+
+  return (
+    <aside className={`admin-sidebar ${open ? "is-open" : ""}`}>
+      <div className="admin-sidebar__brand">
+        <Logo />
+        <span className="admin-sidebar__brand-text">
+          <strong>Tobacco Hemp</strong>
+          <span>Painel administrativo</span>
+        </span>
+      </div>
+
+      <nav className="admin-nav" aria-label="Navegação do painel">
+        <p className="admin-nav__group">Gestão</p>
+        {items.map(({ label, href, icon: Icon }) => (
+          <Link
+            key={href}
+            href={href}
+            className="admin-nav__link"
+            aria-current={pathname === href ? "page" : undefined}
+            onClick={onClose}
+          >
+            <Icon size={18} aria-hidden="true" />
+            {label}
+          </Link>
+        ))}
+
+        <p className="admin-nav__group">Comercial</p>
+        {sandboxEnabled && (
+          <Link href="/admin/asaas" className="admin-nav__link" onClick={onClose} aria-current={pathname === "/admin/asaas" ? "page" : undefined}>Asaas Sandbox</Link>
+        )}
+        <Link
+          href="/admin/pedidos"
+          className="admin-nav__link"
+          aria-current={pathname.startsWith("/admin/pedidos") ? "page" : undefined}
+          onClick={onClose}
+        >
+          <ShoppingCart size={18} aria-hidden="true" />
+          Pedidos
+          <span className="admin-nav__badge">Demo</span>
+        </Link>
+      </nav>
+
+      <div className="admin-sidebar__footer">
+        <Link href="/" onClick={onClose}>
+          <ArrowLeft size={18} aria-hidden="true" />
+          Voltar à loja
+        </Link>
+      </div>
+    </aside>
+  );
+}

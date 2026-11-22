@@ -5,12 +5,16 @@ import type { Category } from "@/types/category";
 export function CategoryCard({ category }: { category: Category }) {
   return (
     <Link className="category-card" href={`/categoria/${category.slug}`}>
-      <Image
-        src={category.image}
-        alt=""
-        fill
-        sizes="(max-width: 767px) 220px, 250px"
-      />
+      {category.image ? (
+        <Image
+          src={category.image}
+          alt=""
+          fill
+          sizes="(max-width: 767px) 220px, 250px"
+        />
+      ) : (
+        <div className="media-placeholder media-placeholder--category" aria-hidden="true" />
+      )}
       <div>
         <span>{category.name}</span>
         <span className="circle-arrow">

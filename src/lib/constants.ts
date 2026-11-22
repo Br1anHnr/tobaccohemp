@@ -9,9 +9,24 @@ export const STORE = {
   hours: "",
   email: "",
 };
+export const ASAAS_SANDBOX = {
+  apiBase: "https://api-sandbox.asaas.com/v3",
+  checkoutBase: "https://sandbox.asaas.com/checkoutSession/show",
+  notice: "Asaas Sandbox · teste sintético sem valor financeiro",
+};
 export const STORAGE = {
   cart: "th-cart-v1",
   age: "th-age-confirmed",
   favorites: "th-favorites-v1",
   order: "th-demo-order",
+  // Stores only the demo-mode flag in sessionStorage; never credentials.
+  demoAccount: "th-demo-account",
 };
+// Customer authentication is backed by the `/api/auth/*` routes and Neon.
+export const AUTH = {
+  enabled: true,
+};
+export const BRAZIL_STATES = [
+  "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", "MG", "PA",
+  "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", "SP", "SE", "TO",
+] as const;

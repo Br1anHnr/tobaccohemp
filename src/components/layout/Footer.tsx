@@ -3,15 +3,16 @@ import { ArrowUpRight, Camera as Instagram } from "lucide-react";
 import { Container } from "./Container";
 import { Logo } from "./Logo";
 import { Newsletter } from "./Newsletter";
-import { categories } from "@/data/categories";
+import { getStorefrontCategories } from "@/lib/storefront";
 import { STORE } from "@/lib/constants";
-export function Footer() {
+export async function Footer() {
+  const categories = await getStorefrontCategories();
   return (
     <footer className="footer">
       <Container>
         <div className="footer-grid">
           <div className="footer-brand">
-            <Link href="/" aria-label="Tobacco Hemp — início">
+            <Link href="/" prefetch={false} aria-label="Tobacco Hemp — início">
               <Logo />
             </Link>
             <p>
@@ -19,28 +20,28 @@ export function Footer() {
               <br />
               Seus essenciais.
             </p>
-            <Link href="/contato" className="footer-social">
+            <Link href="/contato" prefetch={false} className="footer-social">
               <Instagram size={16} /> {STORE.instagramHandle}{" "}
               <ArrowUpRight size={14} />
             </Link>
           </div>
           <div>
             <h3>Institucional</h3>
-            <Link href="/sobre">Sobre nós</Link>
-            <Link href="/contato">Nossa loja</Link>
-            <Link href="/contato">Contato</Link>
+            <Link href="/sobre" prefetch={false}>Sobre nós</Link>
+            <Link href="/contato" prefetch={false}>Nossa loja</Link>
+            <Link href="/contato" prefetch={false}>Contato</Link>
           </div>
           <div>
             <h3>Ajuda</h3>
-            <Link href="/ajuda/trocas">Trocas e devoluções</Link>
-            <Link href="/ajuda/pagamentos">Formas de pagamento</Link>
-            <Link href="/ajuda/privacidade">Política de privacidade</Link>
-            <Link href="/ajuda/termos">Termos de uso</Link>
+            <Link href="/ajuda/trocas" prefetch={false}>Trocas e devoluções</Link>
+            <Link href="/ajuda/pagamentos" prefetch={false}>Formas de pagamento</Link>
+            <Link href="/ajuda/privacidade" prefetch={false}>Política de privacidade</Link>
+            <Link href="/ajuda/termos" prefetch={false}>Termos de uso</Link>
           </div>
           <div>
             <h3>Categorias</h3>
             {categories.map((c) => (
-              <Link key={c.slug} href={`/categoria/${c.slug}`}>
+              <Link key={c.slug} href={`/categoria/${c.slug}`} prefetch={false}>
                 {c.name}
               </Link>
             ))}

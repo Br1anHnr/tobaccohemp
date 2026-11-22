@@ -1,9 +1,11 @@
 "use client";
 import { currency } from "@/lib/currency";
 import { cartTotal, useCart } from "@/store/cart-store";
+import { useCatalog } from "@/store/catalog-store";
 import { ButtonLink } from "@/components/ui/Button";
 export function CartSummary({ checkout = false }: { checkout?: boolean }) {
   const items = useCart((s) => s.items);
+  useCatalog((s) => s.products);
   return (
     <div className="cart-summary">
       <p>
@@ -23,7 +25,7 @@ export function CartSummary({ checkout = false }: { checkout?: boolean }) {
           Finalizar pedido
         </ButtonLink>
       )}
-      <small>Preços demonstrativos. A entrega não está incluída.</small>
+      <small>Entrega a combinar na confirmação do pedido.</small>
     </div>
   );
 }

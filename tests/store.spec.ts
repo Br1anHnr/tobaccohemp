@@ -230,6 +230,7 @@ test("cart quantities, variants, stock ceiling, persistence and removal", async 
     dialog.getByLabel("Quantidade de Case Compact Preto", { exact: true }),
   ).toHaveText("2");
   await dialog.getByRole("link", { name: "Ver carrinho" }).click();
+  await expect(page).toHaveURL(/\/carrinho$/);
   await page.reload();
   await expect(
     page.getByLabel("Quantidade de Case Compact Preto", { exact: true }),
@@ -308,6 +309,55 @@ test("checkout validates, confirms demo order and clears persisted cart", async 
       name: "Seu carrinho está esperando por você.",
     }),
   ).toBeVisible();
+});
+
+test("checkout supports payment method selection without collecting card data or storing PII", async ({
+  page,
+}) => {
+  await enter(page, "/produto/case-compact-preto");
+  await page
+    .getByRole("button", { name: "Adicionar Case Compact Preto ao carrinho" })
+    .click();
+  await page
+    .getByRole("dialog")
+    .getByRole("link", { name: "Finalizar pedido" })
+    .click();
+
+  await expect(page.locator("input[name='cardNumber']")).toHaveCount(0);
+  await expect(page.locator("#channel-whatsapp")).toHaveCount(0);
+  await page.locator("#method-pix").check();
+
+  const values: Record<string, string> = {
+    name: "Cliente Simulação",
+    email: "privado@example.com",
+    phone: "11988887777",
+    zip: "01001000",
+    address: "Rua Teste",
+    number: "42",
+    city: "São Paulo",
+  };
+  for (const [key, value] of Object.entries(values))
+    await page.locator(`#checkout-${key}`).fill(value);
+  await page.getByLabel("Estado", { exact: true }).selectOption("SP");
+  await page
+    .getByLabel("Entendo que este pedido é apenas uma demonstração.")
+    .check();
+  await page
+    .getByRole("button", { name: "Finalizar pedido", exact: true })
+    .click();
+
+  await expect(page).toHaveURL(/pedido-confirmado/);
+  await expect(page.locator(".confirmation")).not.toContainText("(desacoplado)");
+  await expect(page.locator(".demo-pix-code")).toContainText("SEM-VALOR-FINANCEIRO");
+
+  await page.locator(".confirmation-details summary").click();
+  await expect(page.locator(".confirmation-items")).toContainText("Case Compact Preto");
+  await expect(page.locator(".confirmation-history")).toContainText("Aguardando pagamento");
+
+  const stored = await page.evaluate(() => sessionStorage.getItem("th-demo-order") ?? "");
+  expect(stored).not.toContain("privado@example.com");
+  expect(stored).not.toContain("Cliente Simulação");
+  expect(stored).not.toContain("11988887777");
 });
 
 test("basic accessibility for age gate, home, search and checkout", async ({
@@ -426,4 +476,43 @@ test("corrupt storage recovers without crashing and reduced motion stays operabl
       () => document.documentElement.scrollWidth <= innerWidth + 1,
     ),
   ).toBeTruthy();
+});
+
+test("storefront polish: search clear/enter, active filter chips and stock limit notice", async ({
+  page,
+}, testInfo) => {
+  await enter(page);
+  await page.getByRole("button", { name: "Buscar produtos" }).click();
+  const search = page.getByRole("textbox", { name: "Buscar produtos" });
+  await page
+    .getByRole("button", { name: "Case", exact: true })
+    .click();
+  await expect(search).toHaveValue("Case");
+  await page.getByRole("button", { name: "Limpar busca" }).click();
+  await expect(search).toHaveValue("");
+  await expect(search).toBeFocused();
+  await search.fill("bandeja");
+  await search.press("Enter");
+  await expect(page).toHaveURL(/\/loja\?q=bandeja/);
+  const activeFilters = page.getByLabel("Filtros ativos");
+  await expect(activeFilters).toContainText("Busca: “bandeja”");
+  await activeFilters.getByRole("button", { name: /Busca:/ }).click();
+  await expect(page).toHaveURL(/\/loja$/);
+
+  if (testInfo.project.name === "mobile") {
+    await page.getByRole("button", { name: "Abrir menu" }).click();
+    const mobileNav = page.getByRole("navigation", { name: "Menu mobile" });
+    await expect(
+      mobileNav.getByRole("link", { name: "Loja", exact: true }),
+    ).toHaveAttribute("aria-current", "page");
+    await expect(
+      page.getByRole("dialog").getByRole("link", { name: "Favoritos" }),
+    ).toBeVisible();
+    await page.keyboard.press("Escape");
+  }
+
+  await page.goto("/produto/kit-rotina");
+  for (let i = 1; i < 5; i++)
+    await page.getByRole("button", { name: /Aumentar quantidade/ }).click();
+  await expect(page.locator(".stock-limit")).toContainText("Limite de 5");
 });

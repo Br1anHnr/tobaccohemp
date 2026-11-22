@@ -1,0 +1,83 @@
+# Dashboard conectado ao Neon — desenvolvimento local
+
+A interface administrativa em `/admin` usa as próprias rotas `/api/admin/*` do
+Next.js, que persistem em PostgreSQL (Neon) via `pg`. Não há proxy externo,
+backend separado nem mocks: o catálogo é semeado a partir de `src/data` e todas
+as mutações confirmam no banco. Fora de `development`/`test`, o backend responde
+**503** por padrão; o bloqueio só é liberado em produção com a variável de
+deploy `ADMIN_ENABLED=1` (opt-in explícito, nunca incondicional).
+
+## Pré-requisitos
+
+- Node.js 20.9+ (validado com Node.js 24).
+- Uma instância Neon com um banco e uma string de conexão (o pooler serverless é
+  recomendado para produção).
+
+## Executar
+
+```powershell
+npm.cmd ci
+$env:DATABASE_URL = 'postgresql://USER:PASSWORD@HOST/DB?sslmode=require'
+$env:ADMIN_PASSWORD = 'synthetic-local-only-password'
+npm.cmd run dev
+```
+
+Abra http://127.0.0.1:3000/admin. Entre com `admin@example.test` e a senha de
+`ADMIN_PASSWORD`. O schema é criado e o catálogo é semeado na primeira requisição
+(`src/shared/server/migrate.ts` e `seed.ts`), de forma idempotente.
+
+## Verificar
+
+```powershell
+npm.cmd run lint
+npm.cmd run typecheck
+npm.cmd run build
+# Integração com o Neon real (cria e limpa um produto E2E por execução):
+$env:DATABASE_URL = 'postgresql://USER:PASSWORD@HOST/DB?sslmode=require'
+npm.cmd run test:integration
+# Regressão visual/loja em porta livre, contra o build local:
+$env:PLAYWRIGHT_BASE_URL = 'http://127.0.0.1:3220'
+$env:CI = '1'
+npm.cmd run test:e2e
+```
+
+A suíte de integração sobe um único servidor temporário em 3210 (cache em
+`.next-integration`), sem reutilizar processos existentes, e valida desktop e
+celular: login, rejeição de origem, cookie, cadastro de produto pela interface,
+estoque após reload, indicadores, ausência de fallback para mocks, logout e
+acessibilidade. Cada execução cria um produto com SKU `E2E-*` e o remove ao
+final (via `pg`); os dois produtos `E2E-*` remanescentes da missão anterior
+foram removidos manualmente do banco.
+
+## O que já foi preparado para um Preview da Vercel
+
+- **Bloqueio 503 controlado**: liberado apenas com `ADMIN_ENABLED=1` em produção
+  (`src/shared/server/admin-http.ts`). Sem essa variável, o backend segue 503.
+- **Sessões serverless**: o `Map` em memória foi substituído por sessões no
+  PostgreSQL (`admin_sessions` em `src/shared/server/migrate.ts`, operadas por
+  `src/modules/auth/infrastructure/admin-auth.ts`). Apenas o digest SHA-256 do
+  token é persistido; a sessão é revogável no logout e invalidada quando
+  `ADMIN_PASSWORD` muda. O cookie continua `HttpOnly` + `SameSite=Strict` e fica
+  `Secure` em HTTPS.
+- **Rate limiting distribuído**: as tentativas de login são persistidas em
+  `admin_login_attempts`, sobrevivendo a cold starts e a múltiplas instâncias.
+
+## O que falta para um Preview da Vercel (não feito nesta missão)
+
+1. **Contas e segredos**: trocar a senha única em `ADMIN_PASSWORD` comparada por
+   hash por usuários reais com senha hash (bcrypt/argon2), e mover segredos para
+   as Environment Variables da Vercel.
+2. **Migrações**: executar `migrate.ts`/`seed.ts` em uma etapa de build/CI em vez
+   de lazy na primeira requisição de cada cold start.
+3. **Driver/conexão**: usar o pooler do Neon (já configurado) ou
+   `@neondatabase/serverless` para conexões em ambiente serverless.
+4. **Defesa em profundidade**: opcionalmente, token CSRF por requisição (o Origin
+   + `SameSite=Strict` já é uma base válida).
+
+## Resultado desta conexão
+
+- Login, cadastro de produto, edição de estoque e indicadores testados pela
+  interface contra o Neon, sem mocks; persistência confirmada após reiniciar o
+  servidor.
+- Lint, TypeScript e build aprovados.
+- Contrato em `src/shared/contracts/admin.ts` é a fonte única dos tipos de rede.

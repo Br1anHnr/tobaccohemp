@@ -6,6 +6,9 @@ export default defineConfig([
   ...nextTs,
   globalIgnores([
     ".next/**",
+    ".next-integration/**",
+    ".next-preview/**",
+    ".preview-validation/**",
     "test-results/**",
     "playwright-report/**",
     "next-env.d.ts",
