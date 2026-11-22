@@ -4,12 +4,13 @@ import { execFileSync } from "node:child_process";
 import { pool } from "../../src/shared/server/database";
 import { ensureSchema, migrations } from "../../src/shared/server/migrate";
 import { signUpCustomer, customerSessionCookie } from "../../src/modules/auth";
-import { createOrder, getOrderDetail, expireOverdueOrders, transitionOrderStatus } from "../../src/modules/orders";
-import { createSandboxPayment, processAsaasEvent, sandboxPaymentView, sandboxDashboard } from "../../src/modules/orders/infrastructure/asaas-sandbox";
+import { createOrder, getOrderDetail, expireOverdueOrders, transitionOrderStatus, listOrderHistory, listCustomerOrders } from "../../src/modules/orders";
+import { createSandboxPayment, processAsaasEvent, sandboxPaymentView, sandboxDashboard, adminCancelSandboxAttempt } from "../../src/modules/orders/infrastructure/asaas-sandbox";
 import { AsaasClient, ASAAS_SANDBOX_BASE, sandboxEnabled } from "../../src/modules/orders/infrastructure/asaas-client";
 import { POST as webhook } from "../../src/app/api/webhooks/asaas/route";
 import { POST as checkout } from "../../src/app/api/checkout/asaas/route";
 import { GET as lookup } from "../../src/app/api/checkout/asaas/[id]/route";
+import { GET as customerOrdersRoute } from "../../src/app/api/auth/orders/route";
 
 test.describe.configure({ mode: "serial" });
 type Payment = Record<string, unknown>;
@@ -18,7 +19,7 @@ const token = process.env.ASAAS_SANDBOX_WEBHOOK_TOKEN!;
 const payments = new Map<string, Payment>();
 let postCount = 0;
 let sequence = 0;
-let failure: "none" | "before" | "after" | "qr" | "get" = "none";
+let failure: "none" | "before" | "after" | "qr" | "qr400" | "get" = "none";
 let account: { id: string; token: string };
 let other: { id: string; token: string };
 const requests: { url: string; init?: RequestInit }[] = [];
@@ -38,6 +39,7 @@ const mockFetch: typeof fetch = async (input, init) => {
   if (failure === "get") throw new Error("transient provider outage");
   if (url.includes("/pixQrCode")) {
     if (failure === "qr") return new Response("no QR", { status: 503 });
+    if (failure === "qr400") return Response.json({ errors: [{ code: "invalid_action", description: "SECRET_SHOULD_NOT_LEAK" }] }, { status: 400 });
     return Response.json({ encodedImage: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", payload: "000201-SYNTHETIC-PIX", expirationDate: "2026-11-23 23:59:59" });
   }
   const parsed = new URL(url);
@@ -56,8 +58,8 @@ test.beforeAll(async () => {
   await ensureSchema();
   await pool().query("INSERT INTO products(id,sku,name,category_slug,price_cents,active,created_at,tags) VALUES('sandbox-accessory','SYNTHETIC-CASE','Case sintético','cases',4990,true,now(),ARRAY['synthetic'])");
   await pool().query("INSERT INTO inventory(product_id,quantity,reorder_point,updated_at) VALUES('sandbox-accessory',100,1,now())");
-  const first = await signUpCustomer({ name: "Teste Sandbox", email: "sandbox@example.test", password: "Synthetic-test-password123" });
-  const second = await signUpCustomer({ name: "Outro Teste", email: "other@example.test", password: "Synthetic-test-password123" });
+  const first = await signUpCustomer({ name: "Teste Sandbox", email: "sandbox@example.test", phone: "11999990001", password: "Synthetic-test-password123" });
+  const second = await signUpCustomer({ name: "Outro Teste", email: "other@example.test", phone: "11999990002", password: "Synthetic-test-password123" });
   account = { id: first.account.id, token: first.token }; other = { id: second.account.id, token: second.token };
 });
 test.afterAll(async () => { await pool().end(); });
@@ -86,9 +88,11 @@ test("migration upgrades published 18ae2b5 schema and preserves existing invento
     for(const sql of baseline)await tx.query(sql);
     await tx.query("INSERT INTO products(id,sku,name,price_cents,active,created_at) VALUES('preserved','PRESERVED','Case sintético',100,true,now())");
     await tx.query("INSERT INTO inventory(product_id,quantity,reorder_point,updated_at) VALUES('preserved',3,1,now())");
-    await tx.query(migrations.at(-1)!.sql);
+    for (const migration of migrations.slice(7)) await tx.query(migration.sql);
     expect((await tx.query("SELECT quantity FROM inventory WHERE product_id='preserved'")).rows[0].quantity).toBe(3);
     expect((await tx.query("SELECT count(*)::int AS n FROM asaas_sandbox_attempts")).rows[0].n).toBe(0);
+    expect((await tx.query("SELECT column_name FROM information_schema.columns WHERE table_schema='sandbox_upgrade' AND table_name='asaas_sandbox_attempts' AND column_name='last_error_code'")).rows).toHaveLength(1);
+    expect((await tx.query("SELECT to_regclass('sandbox_upgrade.customer_addresses')::text AS t")).rows[0].t).toBe("customer_addresses");
   } finally {await tx.query("ROLLBACK");tx.release();}
 });
 
@@ -252,4 +256,87 @@ test("only explicit Sandbox preview branch is permitted and production stays dis
     process.env.VERCEL_GIT_COMMIT_REF="sandbox/asaas-preview";expect(sandboxEnabled()).toBe(true);
     process.env.VERCEL_ENV="production";expect(sandboxEnabled()).toBe(false);
   } finally { process.env = saved; }
+});
+
+test("PAYMENT_OVERDUE expires Pix order and releases stock once; late payment reacquires", async () => {
+  const result = await create("pix-overdue");
+  const before = await stock();
+  const p = payments.get(result.order.providerReference!)!;
+  p.status = "OVERDUE";
+  await processAsaasEvent(event("pix-overdue-1", "PAYMENT_OVERDUE", p), client);
+  expect((await getOrderDetail(result.order.id)).status).toBe("expired");
+  expect(await stock()).toBe(before + 1);
+  await processAsaasEvent(event("pix-overdue-2", "PAYMENT_OVERDUE", p), client);
+  expect(await stock()).toBe(before + 1);
+  p.status = "RECEIVED";
+  await processAsaasEvent(event("pix-late-paid", "PAYMENT_RECEIVED", p), client);
+  expect((await getOrderDetail(result.order.id)).status).toBe("paid");
+  expect(await stock()).toBe(before);
+});
+
+test("adminCancelSandboxAttempt releases uncertain stock when unpaid and blocks settled payments", async () => {
+  failure = "before";
+  const uncertain = await create("cancel-uncertain");
+  const afterReserve = await stock();
+  expect(uncertain.attemptState).toBe("uncertain");
+  failure = "none";
+  const canceled = await adminCancelSandboxAttempt(uncertain.order.id, "admin-test", "Limpeza de tentativa", client);
+  expect(canceled.order.status).toBe("canceled");
+  expect(canceled.order.stockStatus).toBe("released");
+  expect(await stock()).toBe(afterReserve + 1);
+
+  const paidAttempt = await create("cancel-settled-guard");
+  const p = payments.get(paidAttempt.order.providerReference!)!;
+  p.status = "RECEIVED";
+  await expect(adminCancelSandboxAttempt(paidAttempt.order.id, "admin-test", undefined, client)).rejects.toMatchObject({
+    status: 409,
+    code: "PAYMENT_ALREADY_CONFIRMED",
+  });
+  await processAsaasEvent(event("settled-before-cancel", "PAYMENT_RECEIVED", p), client);
+  await expect(adminCancelSandboxAttempt(paidAttempt.order.id, "admin-test", undefined, client)).rejects.toMatchObject({
+    status: 409,
+    code: "CANNOT_CANCEL_SETTLED",
+  });
+});
+
+test("sanitized provider diagnostics persist without leaking bodies and clear on reconcile; empty card externalReference reconciles", async () => {
+  failure = "qr400";
+  const qrErr = await create("qr-400-diag");
+  expect(qrErr.warning).toBe("ASAAS_QR_UNAVAILABLE");
+  expect(qrErr.diagnostic).toEqual({ code: "invalid_action", httpStatus: 400 });
+  const dbRow = (await pool().query("SELECT last_error_code, last_error_status FROM asaas_sandbox_attempts WHERE order_id=$1", [qrErr.order.id])).rows[0];
+  expect(dbRow).toEqual({ last_error_code: "invalid_action", last_error_status: 400 });
+  expect(JSON.stringify(qrErr)).not.toContain("SECRET_SHOULD_NOT_LEAK");
+
+  failure = "none";
+  const recovered = await sandboxPaymentView(qrErr.order.id, account.id, client);
+  expect(recovered.pix).toBeDefined();
+  expect(recovered.diagnostic).toBeUndefined();
+  const clearedRow = (await pool().query("SELECT last_error_code, last_error_status FROM asaas_sandbox_attempts WHERE order_id=$1", [qrErr.order.id])).rows[0];
+  expect(clearedRow).toEqual({ last_error_code: null, last_error_status: null });
+
+  const card = await create("card-empty-extref", "card");
+  const checkoutId = card.order.providerReference!;
+  payments.set("pay_empty_extref", { id: "pay_empty_extref", checkoutSession: checkoutId, externalReference: "", value: 49.9, status: "CONFIRMED", billingType: "CREDIT_CARD" });
+  await processAsaasEvent(event("card-empty-ref", "CHECKOUT_PAID", { id: checkoutId }), client);
+  expect((await getOrderDetail(card.order.id)).status).toBe("paid");
+});
+
+test("customer order history endpoint isolates accounts and admin demo history excludes Asaas orders", async () => {
+  expect((await customerOrdersRoute(request("/api/auth/orders"))).status).toBe(401);
+  const resA = await customerOrdersRoute(request("/api/auth/orders", undefined, { Cookie: `${customerSessionCookie}=${account.token}` }));
+  expect(resA.status).toBe(200);
+  const ordersA = (await resA.json()).data as Array<{ id: string; items: unknown[]; history: unknown[] }>;
+  expect(ordersA.length).toBeGreaterThan(0);
+  expect(ordersA[0].items.length).toBeGreaterThan(0);
+  expect(ordersA[0].history.length).toBeGreaterThan(0);
+
+  const resB = await customerOrdersRoute(request("/api/auth/orders", undefined, { Cookie: `${customerSessionCookie}=${other.token}` }));
+  expect(resB.status).toBe(200);
+  expect((await resB.json()).data).toEqual([]);
+  const customerListDirect = await listCustomerOrders(other.id);
+  expect(customerListDirect).toEqual([]);
+
+  const adminDemoHistory = await listOrderHistory(50);
+  expect(adminDemoHistory.some(entry => ordersA.some(o => o.id === entry.orderId))).toBe(false);
 });

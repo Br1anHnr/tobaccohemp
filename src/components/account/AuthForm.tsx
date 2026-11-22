@@ -91,6 +91,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
               email,
               password,
               name: String(data.get("name")).trim(),
+              phone: String(data.get("phone") ?? "").trim(),
             })
           : await authClient.requestPasswordReset(email);
     // Passwords are discarded right after the request; nothing is persisted.
@@ -161,6 +162,22 @@ export function AuthForm({ mode }: { mode: Mode }) {
               : undefined
           }
         />
+        {mode === "signup" && (
+          <FormField
+            id={id("phone")}
+            name="phone"
+            type="tel"
+            label="Telefone"
+            autoComplete="tel"
+            inputMode="tel"
+            placeholder="(11) 99999-9999"
+            maxLength={20}
+            required
+            wide
+            error={errors.phone}
+            hint="Com DDD (10 ou 11 dígitos), para contato e entrega."
+          />
+        )}
         {mode !== "reset" && (
           <PasswordField
             id={id("password")}

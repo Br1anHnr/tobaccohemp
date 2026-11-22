@@ -1,4 +1,9 @@
-import { customerEndpoints, type CustomerAccount } from "@/shared/contracts/customer";
+import {
+  customerEndpoints,
+  type CustomerAccount,
+  type CustomerAddress,
+  type CustomerAddressInput,
+} from "@/shared/contracts/customer";
 import type { AuthResult, CustomerProfile } from "@/types/account";
 import { AUTH } from "./constants";
 
@@ -8,6 +13,7 @@ export interface SignInInput {
 }
 export interface SignUpInput extends SignInInput {
   name: string;
+  phone: string;
 }
 
 /**
@@ -21,6 +27,9 @@ export interface AuthClient {
   requestPasswordReset(email: string): Promise<AuthResult>;
   resetPassword(token: string, password: string): Promise<AuthResult>;
   updateProfile(profile: CustomerProfile): Promise<AuthResult>;
+  saveAddress(input: CustomerAddressInput): Promise<AuthResult>;
+  updateAddress(id: string, input: CustomerAddressInput): Promise<AuthResult>;
+  deleteAddress(id: string): Promise<AuthResult>;
   signOut(): Promise<AuthResult>;
 }
 
@@ -30,6 +39,7 @@ const toProfile = (account: CustomerAccount): CustomerProfile => ({
   phone: account.phone,
   city: account.city,
   state: account.state,
+  addresses: account.addresses ?? [],
 });
 
 type AuthErrorCode = "invalid" | "network" | "unavailable" | "rate_limit";
@@ -90,6 +100,31 @@ const httpAuth: AuthClient = {
     if ("error" in result) return error(result);
     return { ok: true, account: toProfile(result.data as CustomerAccount) };
   },
+  async saveAddress(input) {
+    const result = await call(customerEndpoints.addresses, {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+    if ("error" in result) return error(result);
+    const data = result.data as { address: CustomerAddress; addresses: CustomerAddress[] };
+    return { ok: true, address: data.address, addresses: data.addresses };
+  },
+  async updateAddress(id, input) {
+    const result = await call(`${customerEndpoints.addresses}/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+    if ("error" in result) return error(result);
+    const data = result.data as { address: CustomerAddress; addresses: CustomerAddress[] };
+    return { ok: true, address: data.address, addresses: data.addresses };
+  },
+  async deleteAddress(id) {
+    const result = await call(`${customerEndpoints.addresses}/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    if ("error" in result) return error(result);
+    return { ok: true, addresses: (result.data as CustomerAddress[]) ?? [] };
+  },
   async signOut() {
     const result = await call(customerEndpoints.logout, { method: "POST" });
     return error(result);
@@ -111,6 +146,31 @@ const text = (data: FormData, key: string) =>
   String(data.get(key) ?? "").trim();
 const isEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 
+export function phoneDigits(value: string): string {
+  return value.replace(/\D/g, "");
+}
+
+export function isValidPhone(value: string): boolean {
+  const digits = phoneDigits(value);
+  return digits.length === 10 || digits.length === 11;
+}
+
+export function formatPhone(value: string): string {
+  const digits = phoneDigits(value);
+  if (digits.length === 11) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  }
+  if (digits.length === 10) {
+    return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  }
+  return value;
+}
+
+export function formatZip(value: string): string {
+  const digits = value.replace(/\D/g, "");
+  return digits.length === 8 ? `${digits.slice(0, 5)}-${digits.slice(5)}` : value;
+}
+
 export function validateEmail(data: FormData, errors: Errors = {}) {
   if (!isEmail(text(data, "email")))
     errors.email = "Informe um e-mail válido.";
@@ -119,7 +179,7 @@ export function validateEmail(data: FormData, errors: Errors = {}) {
 
 export function validateSignIn(data: FormData) {
   const errors = validateEmail(data);
-  if (!String(data.get("password") ?? "")) errors.password = "Informe sua senha.";
+  if (!String(data.get("password") ?? "")) errors["password"] = "Informe sua senha.";
   return errors;
 }
 
@@ -135,6 +195,8 @@ export function validateSignUp(data: FormData) {
   const errors: Errors = {};
   if (text(data, "name").length < 3) errors.name = "Informe seu nome completo.";
   validateEmail(data, errors);
+  if (!isValidPhone(text(data, "phone")))
+    errors.phone = "Informe um telefone com DDD (10 ou 11 dígitos).";
   const password = String(data.get("password") ?? "");
   const issues = passwordIssues(password);
   if (issues.length) errors.password = `A senha precisa ter ${issues.join(", ")}.`;
@@ -161,8 +223,7 @@ export function validateProfile(data: FormData) {
   const errors: Errors = {};
   if (text(data, "name").length < 3) errors.name = "Informe seu nome completo.";
   validateEmail(data, errors);
-  const phone = text(data, "phone").replace(/\D/g, "");
-  if (phone.length < 10 || phone.length > 11)
+  if (!isValidPhone(text(data, "phone")))
     errors.phone = "Informe um telefone com DDD (10 ou 11 dígitos).";
   if (!text(data, "city")) errors.city = "Informe sua cidade.";
   if (!/^[A-Z]{2}$/.test(text(data, "state"))) errors.state = "Selecione o estado.";
@@ -176,5 +237,29 @@ export function profileFromForm(data: FormData): CustomerProfile {
     phone: text(data, "phone"),
     city: text(data, "city"),
     state: text(data, "state"),
+  };
+}
+
+export function validateAddressForm(data: FormData): Errors {
+  const errors: Errors = {};
+  if (text(data, "zip").replace(/\D/g, "").length !== 8)
+    errors.zip = "Informe um CEP com 8 dígitos.";
+  if (!text(data, "street")) errors.street = "Informe o endereço.";
+  if (!text(data, "number")) errors.number = "Informe o número.";
+  if (!text(data, "city")) errors.city = "Informe a cidade.";
+  if (!/^[A-Z]{2}$/.test(text(data, "state"))) errors.state = "Selecione o estado.";
+  return errors;
+}
+
+export function addressFromForm(data: FormData): CustomerAddressInput {
+  return {
+    label: text(data, "label") || "Principal",
+    zip: text(data, "zip"),
+    street: text(data, "street"),
+    number: text(data, "number"),
+    complement: text(data, "complement"),
+    city: text(data, "city"),
+    state: text(data, "state"),
+    isDefault: data.get("isDefault") === "on",
   };
 }

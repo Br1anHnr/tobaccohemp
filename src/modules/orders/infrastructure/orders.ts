@@ -34,6 +34,11 @@ export interface OrderHistoryFeedEntry extends OrderStatusHistoryEntry {
   customerLabel: string;
 }
 
+export interface CustomerOrderDetail extends OrderDetail {
+  attemptState?: string | null;
+  lastProviderStatus?: string | null;
+}
+
 function isPoolClient(db: Db): db is PoolClient {
   return "release" in db && typeof (db as PoolClient).release === "function";
 }
@@ -232,6 +237,7 @@ export async function listOrderHistory(
             h.actor_id, h.metadata_json, h.created_at, o.order_number, o.customer_label
        FROM order_status_history h
        JOIN orders o ON o.id = h.order_id
+      WHERE o.is_demo = true AND o.payment_provider = 'demo'
       ORDER BY h.created_at DESC, h.id DESC
       LIMIT $1`,
     [safeLimit],
@@ -242,6 +248,76 @@ export async function listOrderHistory(
       ...mapHistoryRow(r),
       orderNumber: String(r.order_number),
       customerLabel: String(r.customer_label),
+    };
+  });
+}
+
+export async function listCustomerOrders(
+  customerAccountId: string,
+  db: Db = pool(),
+): Promise<CustomerOrderDetail[]> {
+  const ordersRes = await db.query(
+    `SELECT o.id, o.order_number, o.customer_account_id, o.customer_label, o.status, o.channel,
+            o.payment_provider, o.payment_method, o.provider_reference, o.checkout_url,
+            o.subtotal_cents, o.shipping_cents, o.discount_cents, o.total_cents, o.currency,
+            o.is_demo, o.eligibility_status, o.stock_status, o.stock_reserved_at, o.stock_released_at,
+            o.expires_at, o.created_at, o.updated_at,
+            a.state AS attempt_state, a.last_provider_status
+       FROM orders o
+       LEFT JOIN asaas_sandbox_attempts a ON a.order_id = o.id
+      WHERE o.customer_account_id = $1
+      ORDER BY o.created_at DESC, o.id DESC
+      LIMIT 50`,
+    [customerAccountId],
+  );
+  if (!ordersRes.rows.length) return [];
+
+  const orderIds = ordersRes.rows.map((row) => String(row.id));
+  const [itemsRes, historyRes] = await Promise.all([
+    db.query(
+      `SELECT id, order_id, product_id, sku, product_name, category_slug, variant,
+              quantity, unit_price_cents, line_total_cents, eligible
+         FROM order_items
+        WHERE order_id = ANY($1::text[])
+        ORDER BY id ASC`,
+      [orderIds],
+    ),
+    db.query(
+      `SELECT id, order_id, from_status, to_status, reason, actor_type, actor_id,
+              metadata_json, created_at
+         FROM order_status_history
+        WHERE order_id = ANY($1::text[])
+        ORDER BY created_at ASC, id ASC`,
+      [orderIds],
+    ),
+  ]);
+
+  const itemsByOrder = new Map<string, OrderItem[]>();
+  for (const row of itemsRes.rows) {
+    const item = mapOrderItemRow(row as Record<string, unknown>);
+    const list = itemsByOrder.get(item.orderId);
+    if (list) list.push(item);
+    else itemsByOrder.set(item.orderId, [item]);
+  }
+
+  const historyByOrder = new Map<string, OrderStatusHistoryEntry[]>();
+  for (const row of historyRes.rows) {
+    const entry = mapHistoryRow(row as Record<string, unknown>);
+    const list = historyByOrder.get(entry.orderId);
+    if (list) list.push(entry);
+    else historyByOrder.set(entry.orderId, [entry]);
+  }
+
+  return ordersRes.rows.map((row) => {
+    const r = row as Record<string, unknown>;
+    const order = mapOrderRow(r);
+    return {
+      ...order,
+      attemptState: r.attempt_state == null ? null : String(r.attempt_state),
+      lastProviderStatus:
+        r.last_provider_status == null ? null : String(r.last_provider_status),
+      items: itemsByOrder.get(order.id) ?? [],
+      history: historyByOrder.get(order.id) ?? [],
     };
   });
 }
@@ -757,6 +833,42 @@ export async function reconcileSandboxOrder(tx: PoolClient, id: string, status: 
   const current = order.rows[0].status;
   if (current === "refunded" || (current === "paid" && status !== "refunded") || (status === "pending_payment") || (["expired", "canceled"].includes(current) && ["expired", "canceled"].includes(status))) return getOrderDetail(id, tx);
   return applyStatusTransition(tx, id, status, "Estado confirmado pelo Asaas Sandbox.", { actorType: "provider_webhook", actorId: "asaas-sandbox" }, { environment: "sandbox" }, true);
+}
+
+/** Releases stock reservation of an unsettled Asaas Sandbox attempt after provider verification. */
+export async function cancelSandboxOrder(
+  tx: PoolClient,
+  id: string,
+  adminId: string,
+  reason?: string,
+): Promise<OrderDetail> {
+  const order = await tx.query(
+    "SELECT payment_provider, is_demo, status FROM orders WHERE id=$1 FOR UPDATE",
+    [id],
+  );
+  if (!order.rows.length || order.rows[0].payment_provider !== "asaas" || order.rows[0].is_demo !== false) {
+    throw new AdminError(409, "SANDBOX_ASSOCIATION", "Associação Sandbox inválida.");
+  }
+  const current = String(order.rows[0].status) as OrderStatus;
+  if (["paid", "refunded"].includes(current)) {
+    throw new AdminError(
+      409,
+      "CANNOT_CANCEL_SETTLED",
+      "Pedido já liquidado ou estornado não pode ser cancelado manualmente.",
+    );
+  }
+  if (["canceled", "expired"].includes(current)) {
+    return getOrderDetail(id, tx);
+  }
+  return applyStatusTransition(
+    tx,
+    id,
+    "canceled",
+    reason?.trim() || "Tentativa Asaas Sandbox cancelada pelo administrador com liberação de estoque.",
+    { actorType: "admin", actorId: adminId },
+    { environment: "sandbox", trigger: "admin_sandbox_cancel" },
+    true,
+  );
 }
 
 export async function expireOverdueOrders(

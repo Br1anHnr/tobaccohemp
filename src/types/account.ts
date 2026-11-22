@@ -1,4 +1,7 @@
+import type { CustomerAddress, CustomerAddressInput } from "@/shared/contracts/customer";
 import type { CartItem } from "./cart";
+
+export type { CustomerAddress, CustomerAddressInput };
 
 export interface CustomerProfile {
   name: string;
@@ -6,6 +9,7 @@ export interface CustomerProfile {
   phone: string;
   city: string;
   state: string;
+  addresses?: CustomerAddress[];
 }
 
 export type OrderStatus = "em-separacao" | "enviado" | "entregue" | "cancelado";
@@ -20,5 +24,12 @@ export interface CustomerOrder {
 
 /** Result returned by any authentication adapter (demo or real). */
 export type AuthResult =
-  | { ok: true; account?: CustomerProfile; resetToken?: string; message?: string }
+  | {
+      ok: true;
+      account?: CustomerProfile;
+      address?: CustomerAddress;
+      addresses?: CustomerAddress[];
+      resetToken?: string;
+      message?: string;
+    }
   | { ok: false; code: "invalid" | "network" | "unavailable" | "rate_limit"; message: string };

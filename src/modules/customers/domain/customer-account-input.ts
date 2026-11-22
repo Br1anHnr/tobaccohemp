@@ -1,12 +1,34 @@
-import type { CustomerProfileInput, CustomerSignInInput, CustomerSignUpInput, PasswordResetInput } from "@/shared/contracts/customer";
-import { invalid, objectInput, textInput } from "@/shared/server/validation";
+import { BRAZIL_STATES } from "@/lib/constants";
+import type {
+  CustomerAddressInput,
+  CustomerProfileInput,
+  CustomerSignInInput,
+  CustomerSignUpInput,
+  PasswordResetInput,
+} from "@/shared/contracts/customer";
+import { invalid, objectInput, textInput, textInputAllowEmpty } from "@/shared/server/validation";
 
 const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
+const validStates = new Set<string>(BRAZIL_STATES);
 
 function emailInput(value: unknown): string {
   const email = textInput(value, 254).toLowerCase();
   if (!emailRe.test(email)) invalid();
   return email;
+}
+
+/** Strict Brazilian phone validation (DDD + 8 or 9 digits), stored normalized. */
+function phoneInput(value: unknown): string {
+  if (typeof value !== "string" || value.length > 32 || /[\u0000-\u001f\u007f]/u.test(value)) invalid();
+  const digits = value.replace(/\D/g, "");
+  if (digits.length < 10 || digits.length > 11) invalid();
+  return digits;
+}
+
+function stateInput(value: unknown): string {
+  const state = typeof value === "string" ? value.trim().toUpperCase() : invalid();
+  if (!validStates.has(state)) invalid();
+  return state;
 }
 
 /** Strict password policy for new passwords (mirrors the client rules). */
@@ -19,8 +41,13 @@ function passwordInput(value: unknown): string {
 }
 
 export function signUpInput(value: unknown): CustomerSignUpInput {
-  const input = objectInput(value, ["name", "email", "password"]);
-  return { name: textInput(input.name, 120), email: emailInput(input.email), password: passwordInput(input.password) };
+  const input = objectInput(value, ["name", "email", "phone", "password"]);
+  return {
+    name: textInput(input.name, 120),
+    email: emailInput(input.email),
+    phone: phoneInput(input.phone),
+    password: passwordInput(input.password),
+  };
 }
 
 export function signInInput(value: unknown): CustomerSignInInput {
@@ -34,15 +61,37 @@ export function signInInput(value: unknown): CustomerSignInInput {
 
 export function profileInput(value: unknown): CustomerProfileInput {
   const input = objectInput(value, ["name", "phone", "city", "state"]);
-  const phone = typeof input.phone === "string" ? input.phone.replace(/\D/g, "") : invalid();
-  if (phone.length < 10 || phone.length > 11) invalid();
-  const state = typeof input.state === "string" ? input.state.trim().toUpperCase() : invalid();
-  if (!/^[A-Z]{2}$/.test(state)) invalid();
   return {
     name: textInput(input.name, 120),
-    phone,
+    phone: phoneInput(input.phone),
     city: textInput(input.city, 80),
-    state,
+    state: stateInput(input.state),
+  };
+}
+
+export function addressInput(value: unknown): CustomerAddressInput {
+  const input = objectInput(
+    value,
+    ["label", "zip", "street", "number", "complement", "city", "state", "isDefault"],
+    true,
+  );
+  if (typeof input.zip !== "string" || input.zip.length > 16 || /[\u0000-\u001f\u007f]/u.test(input.zip)) invalid();
+  const zip = input.zip.replace(/\D/g, "");
+  if (zip.length !== 8) invalid();
+
+  const labelRaw = input.label === undefined ? "" : textInputAllowEmpty(input.label, 40);
+  const complement = input.complement === undefined ? "" : textInputAllowEmpty(input.complement, 120);
+  if (input.isDefault !== undefined && typeof input.isDefault !== "boolean") invalid();
+
+  return {
+    label: labelRaw || "Principal",
+    zip,
+    street: textInput(input.street, 160),
+    number: textInput(input.number, 24),
+    complement,
+    city: textInput(input.city, 80),
+    state: stateInput(input.state),
+    isDefault: input.isDefault,
   };
 }
 

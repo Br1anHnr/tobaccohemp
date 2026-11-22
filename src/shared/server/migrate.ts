@@ -233,31 +233,62 @@ export const migrations: Migration[] = [
       ALTER TABLE inventory ADD CONSTRAINT inventory_quantity_non_negative_chk CHECK (quantity >= 0);
     `,
   },
+  {
+    id: "005_customer_addresses",
+    sql: `
+      CREATE TABLE IF NOT EXISTS customer_addresses (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL REFERENCES customer_accounts(id) ON DELETE CASCADE,
+        label TEXT NOT NULL DEFAULT 'Principal',
+        zip TEXT NOT NULL,
+        street TEXT NOT NULL,
+        number TEXT NOT NULL,
+        complement TEXT NOT NULL DEFAULT '',
+        city TEXT NOT NULL,
+        state TEXT NOT NULL,
+        is_default BOOLEAN NOT NULL DEFAULT false,
+        created_at TIMESTAMPTZ NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS customer_addresses_account_idx
+        ON customer_addresses (account_id, is_default DESC, updated_at DESC);
+    `,
+  },
 ];
 
-migrations.push({
-  id: "005_asaas_sandbox",
-  sql: `
-    CREATE TABLE asaas_sandbox_attempts (
-      order_id TEXT PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,
-      external_reference TEXT NOT NULL UNIQUE,
-      method TEXT NOT NULL CHECK (method IN ('pix','card')),
-      state TEXT NOT NULL CHECK (state IN ('prepared','creating','uncertain','ready','review')),
-      provider_id TEXT UNIQUE,
-      payment_id TEXT UNIQUE,
-      last_provider_status TEXT,
-      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-    CREATE TABLE asaas_sandbox_events (
-      event_id TEXT PRIMARY KEY,
-      event_type TEXT NOT NULL,
-      resource_id TEXT,
-      order_id TEXT REFERENCES orders(id) ON DELETE SET NULL,
-      result TEXT NOT NULL,
-      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-    );
-  `,
-});
+migrations.push(
+  {
+    id: "005_asaas_sandbox",
+    sql: `
+      CREATE TABLE IF NOT EXISTS asaas_sandbox_attempts (
+        order_id TEXT PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,
+        external_reference TEXT NOT NULL UNIQUE,
+        method TEXT NOT NULL CHECK (method IN ('pix','card')),
+        state TEXT NOT NULL CHECK (state IN ('prepared','creating','uncertain','ready','review')),
+        provider_id TEXT UNIQUE,
+        payment_id TEXT UNIQUE,
+        last_provider_status TEXT,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+      CREATE TABLE IF NOT EXISTS asaas_sandbox_events (
+        event_id TEXT PRIMARY KEY,
+        event_type TEXT NOT NULL,
+        resource_id TEXT,
+        order_id TEXT REFERENCES orders(id) ON DELETE SET NULL,
+        result TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      );
+    `,
+  },
+  {
+    id: "006_asaas_sandbox_diagnostics",
+    sql: `
+      ALTER TABLE asaas_sandbox_attempts ADD COLUMN IF NOT EXISTS last_error_code TEXT;
+      ALTER TABLE asaas_sandbox_attempts ADD COLUMN IF NOT EXISTS last_error_status INTEGER;
+      ALTER TABLE asaas_sandbox_attempts ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ;
+    `,
+  },
+);
 
 let running: Promise<void> | undefined;
 
@@ -270,16 +301,28 @@ export function ensureSchema(): Promise<void> {
   return running;
 }
 
+async function readAppliedMigrations(): Promise<Set<string>> {
+  const db = pool();
+  try {
+    const applied = await db.query("SELECT id FROM schema_migrations");
+    return new Set(applied.rows.map(row => String(row.id)));
+  } catch (error) {
+    const code = (error as { code?: string } | null)?.code;
+    if (code !== "42P01") throw error;
+    await db.query(
+      `CREATE TABLE IF NOT EXISTS schema_migrations (
+         id TEXT PRIMARY KEY,
+         applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+       )`,
+    );
+    return new Set();
+  }
+}
+
 async function run(): Promise<void> {
   const db = pool();
-  await db.query(
-    `CREATE TABLE IF NOT EXISTS schema_migrations (
-       id TEXT PRIMARY KEY,
-       applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
-     )`,
-  );
-  const applied = await db.query("SELECT id FROM schema_migrations");
-  const done = new Set(applied.rows.map(row => String(row.id)));
+  const done = await readAppliedMigrations();
+  let appliedAny = false;
 
   for (const migration of migrations) {
     if (done.has(migration.id)) continue;
@@ -289,12 +332,38 @@ async function run(): Promise<void> {
       await client.query(migration.sql);
       await client.query("INSERT INTO schema_migrations (id) VALUES ($1)", [migration.id]);
       await client.query("COMMIT");
+      appliedAny = true;
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;
     } finally {
       client.release();
     }
+  }
+
+  if (!appliedAny) {
+    const adminEmail = (process.env.ADMIN_EMAIL ?? "admin@example.test").trim().toLowerCase();
+    const statusResult = await db.query(
+      `SELECT
+         EXISTS(SELECT 1 FROM categories) AS has_categories,
+         EXISTS(SELECT 1 FROM products) AS has_products,
+         EXISTS(SELECT 1 FROM products WHERE slug = '') AS needs_backfill,
+         EXISTS(SELECT 1 FROM admin_accounts WHERE lower(email) = lower($1)) AS has_admin`,
+      [adminEmail],
+    );
+    const status = statusResult.rows[0] as {
+      has_categories: boolean;
+      has_products: boolean;
+      needs_backfill: boolean;
+      has_admin: boolean;
+    };
+    if (!status.has_categories || !status.has_products || status.needs_backfill) {
+      await seedCatalog(db, LOW_STOCK_AT);
+    }
+    if (!status.has_admin) {
+      await bootstrapAdminAccount(db);
+    }
+    return;
   }
 
   await seedCatalog(db, LOW_STOCK_AT);

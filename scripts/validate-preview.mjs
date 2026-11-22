@@ -62,7 +62,7 @@ try {
   assert.equal((await api.post("/api/auth/signup", { data: {} })).status(), 403);
   const email = `preview-${Date.now()}@example.test`;
   const password = "synthetic-customer-password123";
-  const signup = await post("/api/auth/signup", { name: "Cliente Preview", email, password });
+  const signup = await post("/api/auth/signup", { name: "Cliente Preview", email, phone: "11999990000", password });
   assert.equal(signup.status(), 201);
   assert.match(signup.headers()["set-cookie"], /HttpOnly/); assert.match(signup.headers()["set-cookie"], /Secure/);
   assert.equal((await (await api.get("/api/auth/session")).json()).data.email, email);

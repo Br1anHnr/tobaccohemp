@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { getOrderDetail, transitionOrderStatus } from "@/modules/orders";
+import { revalidateStorefrontCatalog } from "@/lib/storefront";
 import { adminRoute, jsonInput } from "@/shared/server/admin-http";
 import { adminMutation } from "@/shared/server/admin-mutation";
 
@@ -23,8 +24,10 @@ export async function PATCH(
   return adminRoute(async (req, user) => {
     const { id } = await context.params;
     const input = await jsonInput(req);
-    return adminMutation((db) =>
+    const updated = await adminMutation((db) =>
       transitionOrderStatus(id, input, { actorType: "admin", actorId: user?.id }, db),
     );
+    revalidateStorefrontCatalog();
+    return updated;
   })(request);
 }

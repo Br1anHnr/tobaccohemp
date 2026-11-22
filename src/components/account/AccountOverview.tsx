@@ -1,24 +1,48 @@
 "use client";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Heart, Package, ShoppingBag } from "lucide-react";
 import { demoOrders } from "@/data/account-demo";
+import { formatPhone, formatZip } from "@/lib/auth";
 import { cartCount, useCart } from "@/store/cart-store";
 import { useAccount } from "@/store/account-store";
-import { OrderCard } from "./OrderHistory";
+import type { CustomerOrderDetail } from "@/modules/orders";
+import { fetchCustomerOrdersClient, OrderCard, RealOrderCard } from "./OrderHistory";
 
 export function AccountOverview() {
+  const customer = useAccount((s) => s.customer);
   const profile = useAccount((s) => s.profile);
   const items = useCart((s) => s.items);
   const favorites = useCart((s) => s.favorites);
   const open = useCart((s) => s.setOverlay);
-  const latest = demoOrders[0];
+  const [realOrders, setRealOrders] = useState<CustomerOrderDetail[]>([]);
+
+  useEffect(() => {
+    if (!customer) return;
+    let cancelled = false;
+    void fetchCustomerOrdersClient().then((rows) => {
+      if (!cancelled) setRealOrders(rows);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [customer]);
+
+  const latestDemo = demoOrders[0];
+  const latestReal = realOrders[0] ?? null;
+  const orderTotalCount = customer ? realOrders.length : demoOrders.length;
+  const primaryAddress =
+    profile.addresses?.find((address) => address.isDefault) ??
+    profile.addresses?.[0] ??
+    null;
+
   return (
     <>
       <section className="account-stats" aria-label="Resumo da conta">
         <Link href="/conta/pedidos" className="stat-card">
           <Package size={20} aria-hidden="true" />
-          <strong>{demoOrders.length}</strong>
-          <span>Pedidos demonstrativos</span>
+          <strong>{orderTotalCount}</strong>
+          <span>{customer ? "Pedidos registrados" : "Pedidos demonstrativos"}</span>
         </Link>
         <Link href="/favoritos" className="stat-card">
           <Heart size={20} aria-hidden="true" />
@@ -38,7 +62,15 @@ export function AccountOverview() {
             Ver histórico <ArrowRight size={15} aria-hidden="true" />
           </Link>
         </div>
-        {latest && <OrderCard order={latest} />}
+        {customer ? (
+          latestReal ? (
+            <RealOrderCard order={latestReal} />
+          ) : (
+            <p className="muted">Nenhum pedido registrado nesta conta até o momento.</p>
+          )
+        ) : (
+          latestDemo && <OrderCard order={latestDemo} />
+        )}
       </section>
       <section className="account-section" aria-labelledby="profile-title">
         <div className="account-section-head">
@@ -58,14 +90,27 @@ export function AccountOverview() {
           </div>
           <div>
             <dt>Telefone</dt>
-            <dd>{profile.phone}</dd>
+            <dd>{profile.phone ? formatPhone(profile.phone) : "Não informado"}</dd>
           </div>
           <div>
             <dt>Cidade</dt>
             <dd>
-              {profile.city} / {profile.state}
+              {profile.city || profile.state
+                ? `${profile.city}${profile.city && profile.state ? " / " : ""}${profile.state}`
+                : "Não informada"}
             </dd>
           </div>
+          {primaryAddress && (
+            <div className="profile-summary-wide">
+              <dt>Endereço principal</dt>
+              <dd>
+                {primaryAddress.street}, {primaryAddress.number}
+                {primaryAddress.complement ? ` — ${primaryAddress.complement}` : ""} ·{" "}
+                {primaryAddress.city}/{primaryAddress.state} · CEP{" "}
+                {formatZip(primaryAddress.zip)}
+              </dd>
+            </div>
+          )}
         </dl>
       </section>
     </>

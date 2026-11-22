@@ -44,11 +44,13 @@ test("sign-up and password recovery validate fields", async ({ page }) => {
   await enter(page, "/conta/cadastro");
   await page.getByLabel("Nome completo").fill("Cliente Teste");
   await page.getByLabel("E-mail", { exact: true }).fill("invalido");
+  await page.getByLabel("Telefone", { exact: true }).fill("123");
   await page.getByLabel("Senha", { exact: true }).fill("abc");
   await page.getByLabel("Confirmar senha").fill("abcd");
   await page.getByRole("button", { name: "Criar conta", exact: true }).click();
   const summary = page.locator(".error-summary");
   await expect(summary).toContainText("e-mail válido");
+  await expect(summary).toContainText("telefone com DDD");
   await expect(summary).toContainText("ao menos 8 caracteres");
   await expect(summary).toContainText("não coincidem");
   await expect(summary).toContainText("18 anos");
@@ -63,12 +65,24 @@ test("sign-up creates an account and opens the customer area", async ({ page }) 
     const body = route.request().postDataJSON();
     return route.fulfill({
       status: 201,
-      json: { data: { id: "e2e", name: body.name, email: body.email, phone: "", city: "", state: "", createdAt: "2026-01-01T00:00:00.000Z" } },
+      json: {
+        data: {
+          id: "e2e",
+          name: body.name,
+          email: body.email,
+          phone: body.phone.replace(/\D/g, ""),
+          city: "",
+          state: "",
+          addresses: [],
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
     });
   });
   await enter(page, "/conta/cadastro");
   await page.getByLabel("Nome completo").fill("Maria Cliente");
   await page.getByLabel("E-mail", { exact: true }).fill("maria@example.com");
+  await page.getByLabel("Telefone", { exact: true }).fill("(11) 98888-7777");
   await page.getByLabel("Senha", { exact: true }).fill("senhaSegura123");
   await page.getByLabel("Confirmar senha").fill("senhaSegura123");
   await page.getByRole("checkbox", { name: /18 anos/ }).check();
@@ -82,6 +96,22 @@ test("signed-in customer reuses account data in demo checkout without re-registe
   page,
 }, testInfo) => {
   await page.route("**/api/auth/session", signedOutSession);
+  await page.route("**/api/auth/addresses", (route) => {
+    const body = route.request().postDataJSON();
+    const saved = {
+      id: "addr-1",
+      label: body.label || "Principal",
+      zip: body.zip.replace(/\D/g, ""),
+      street: body.street,
+      number: body.number,
+      complement: body.complement ?? "",
+      city: body.city,
+      state: body.state,
+      isDefault: true,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    };
+    return route.fulfill({ status: 201, json: { data: { address: saved, addresses: [saved] } } });
+  });
   await page.route("**/api/auth/signup", (route) => {
     const body = route.request().postDataJSON();
     return route.fulfill({
@@ -91,9 +121,10 @@ test("signed-in customer reuses account data in demo checkout without re-registe
           id: "e2e-checkout",
           name: body.name,
           email: body.email,
-          phone: "11988887777",
+          phone: body.phone.replace(/\D/g, ""),
           city: "São Paulo",
           state: "SP",
+          addresses: [],
           createdAt: "2026-01-01T00:00:00.000Z",
         },
       },
@@ -103,6 +134,7 @@ test("signed-in customer reuses account data in demo checkout without re-registe
   await enter(page, "/conta/cadastro");
   await page.getByLabel("Nome completo").fill("Marina Checkout");
   await page.getByLabel("E-mail", { exact: true }).fill("marina.demo@example.test");
+  await page.getByLabel("Telefone", { exact: true }).fill("(11) 98888-7777");
   await page.getByLabel("Senha", { exact: true }).fill("senhaSegura123");
   await page.getByLabel("Confirmar senha").fill("senhaSegura123");
   await page.getByRole("checkbox", { name: /18 anos/ }).check();

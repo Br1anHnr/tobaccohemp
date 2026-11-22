@@ -33,6 +33,7 @@ export const getStorefrontCustomer = cache(
         phone: account.phone,
         city: account.city,
         state: account.state,
+        addresses: account.addresses,
       };
     } catch {
       console.error("[storefront] falha ao resolver a sessão do cliente.");

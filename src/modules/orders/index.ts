@@ -37,9 +37,12 @@ export {
   listOrders,
   getOrderDetail,
   listOrderHistory,
+  listCustomerOrders,
   createOrder,
   transitionOrderStatus,
+  cancelSandboxOrder,
   expireOverdueOrders,
   summarizeOrders,
   type OrderHistoryFeedEntry,
+  type CustomerOrderDetail,
 } from "./infrastructure/orders";

@@ -26,6 +26,10 @@ export {
   customerSessionUser,
   invalidateCustomerSession,
   updateCustomerProfile,
+  listCustomerAccountAddresses,
+  createCustomerAccountAddress,
+  updateCustomerAccountAddress,
+  deleteCustomerAccountAddress,
   requestCustomerPasswordReset,
   resetCustomerPassword,
 } from "./infrastructure/customer-auth";

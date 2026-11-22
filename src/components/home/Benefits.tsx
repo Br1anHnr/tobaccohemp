@@ -32,7 +32,7 @@ export function Benefits() {
     <section className="benefits" aria-label="Explore a Tobacco Hemp">
       <Container>
         {benefits.map((b) => (
-          <Link key={b.title} href={b.href}>
+          <Link key={b.title} href={b.href} prefetch={false}>
             <b.icon size={27} strokeWidth={1.3} />
             <div>
               <h3>{b.title}</h3>

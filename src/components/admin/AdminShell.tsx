@@ -12,6 +12,7 @@ const sectionFor = (pathname: string) => {
   if (pathname.startsWith("/admin/clientes")) return "Clientes";
   if (pathname.startsWith("/admin/produtos")) return "Produtos & estoque";
   if (pathname.startsWith("/admin/categorias")) return "Categorias";
+  if (pathname.startsWith("/admin/asaas")) return "Asaas Sandbox";
   if (pathname.startsWith("/admin/pedidos")) return "Pedidos";
   return "Painel administrativo";
 };

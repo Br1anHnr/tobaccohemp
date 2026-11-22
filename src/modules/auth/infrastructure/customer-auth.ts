@@ -1,8 +1,8 @@
 import { createHash } from "node:crypto";
-import type { CustomerAccount } from "@/shared/contracts/customer";
+import type { CustomerAccount, CustomerAddress } from "@/shared/contracts/customer";
 import { pool, type Db } from "@/shared/server/database";
 import { AdminError, duplicate } from "@/shared/server/validation";
-import { profileInput, resetInput, signInInput, signUpInput } from "@/modules/customers/domain/customer-account-input";
+import { addressInput, profileInput, resetInput, signInInput, signUpInput } from "@/modules/customers/domain/customer-account-input";
 import * as accounts from "@/modules/customers/infrastructure/customer-accounts";
 import { hashPassword, verifyPassword } from "@/modules/customers/infrastructure/password";
 import { localAuthEnabled } from "@/shared/server/preview";
@@ -15,10 +15,16 @@ export const passwordResetSeconds = 30 * 60; // 30 minutes
 const sha256 = (value: string) => createHash("sha256").update(value).digest("hex");
 const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/u;
 
-function toAccount(record: accounts.CustomerRecord): CustomerAccount {
+function toAccount(record: accounts.CustomerRecord, addresses: CustomerAddress[]): CustomerAccount {
   return {
-    id: record.id, name: record.name, email: record.email,
-    phone: record.phone, city: record.city, state: record.state, createdAt: record.createdAt,
+    id: record.id,
+    name: record.name,
+    email: record.email,
+    phone: record.phone,
+    city: record.city,
+    state: record.state,
+    addresses,
+    createdAt: record.createdAt,
   };
 }
 
@@ -38,10 +44,13 @@ function throttle(email: string): void {
 export async function signUpCustomer(value: unknown, db: Db = pool()): Promise<{ account: CustomerAccount; token: string }> {
   const input = signUpInput(value);
   if (await accounts.findCustomerByEmail(input.email, db)) duplicate();
-  const record = await accounts.createCustomerAccount({ name: input.name, email: input.email, passwordHash: await hashPassword(input.password) }, db);
+  const record = await accounts.createCustomerAccount(
+    { name: input.name, email: input.email, phone: input.phone, passwordHash: await hashPassword(input.password) },
+    db,
+  );
   const token = accounts.newOpaqueToken();
   await accounts.createCustomerSession(record.id, sha256(token), new Date(Date.now() + customerSessionSeconds * 1000), db);
-  return { account: toAccount(record), token };
+  return { account: toAccount(record, []), token };
 }
 
 export async function signInCustomer(value: unknown, db: Db = pool()): Promise<{ account: CustomerAccount; token: string }> {
@@ -52,7 +61,8 @@ export async function signInCustomer(value: unknown, db: Db = pool()): Promise<{
   if (!record || !valid) throw new AdminError(401, "INVALID_CREDENTIALS", "Credenciais inválidas.");
   const token = accounts.newOpaqueToken();
   await accounts.createCustomerSession(record.id, sha256(token), new Date(Date.now() + customerSessionSeconds * 1000), db);
-  return { account: toAccount(record), token };
+  const addresses = await accounts.listCustomerAddresses(record.id, db);
+  return { account: toAccount(record, addresses), token };
 }
 
 export async function customerSessionUser(token: string | undefined, db: Db = pool()): Promise<CustomerAccount | null> {
@@ -64,7 +74,7 @@ export async function customerSessionUser(token: string | undefined, db: Db = po
     await accounts.deleteCustomerSession(hash, db);
     return null;
   }
-  return toAccount(session.account);
+  return toAccount(session.account, session.addresses);
 }
 
 export async function invalidateCustomerSession(token: string | undefined, db: Db = pool()): Promise<void> {
@@ -73,7 +83,42 @@ export async function invalidateCustomerSession(token: string | undefined, db: D
 
 export async function updateCustomerProfile(accountId: string, value: unknown, db: Db = pool()): Promise<CustomerAccount> {
   const record = await accounts.updateCustomerProfile(accountId, profileInput(value), db);
-  return toAccount(record);
+  const addresses = await accounts.listCustomerAddresses(accountId, db);
+  return toAccount(record, addresses);
+}
+
+export async function listCustomerAccountAddresses(accountId: string, db: Db = pool()): Promise<CustomerAddress[]> {
+  return accounts.listCustomerAddresses(accountId, db);
+}
+
+export async function createCustomerAccountAddress(
+  accountId: string,
+  value: unknown,
+  db: Db = pool(),
+): Promise<{ address: CustomerAddress; addresses: CustomerAddress[] }> {
+  const address = await accounts.createCustomerAddress(accountId, addressInput(value), db);
+  const addresses = await accounts.listCustomerAddresses(accountId, db);
+  return { address, addresses };
+}
+
+export async function updateCustomerAccountAddress(
+  accountId: string,
+  addressId: string,
+  value: unknown,
+  db: Db = pool(),
+): Promise<{ address: CustomerAddress; addresses: CustomerAddress[] }> {
+  const address = await accounts.updateCustomerAddress(accountId, addressId, addressInput(value), db);
+  const addresses = await accounts.listCustomerAddresses(accountId, db);
+  return { address, addresses };
+}
+
+export async function deleteCustomerAccountAddress(
+  accountId: string,
+  addressId: string,
+  db: Db = pool(),
+): Promise<CustomerAddress[]> {
+  await accounts.deleteCustomerAddress(accountId, addressId, db);
+  return accounts.listCustomerAddresses(accountId, db);
 }
 
 export async function requestCustomerPasswordReset(value: unknown, db: Db = pool()): Promise<{ message: string; resetToken?: string; expiresInSeconds: number }> {

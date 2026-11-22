@@ -49,61 +49,82 @@ export const catalogProducts: CatalogSeed[] = products.map(product => ({
 export async function seedCatalog(db: Db, reorderPoint: number): Promise<void> {
   const now = new Date().toISOString();
 
-  for (const category of categories) {
-    await db.query(
-      `INSERT INTO categories (slug, name, description, image, created_at)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (slug) DO NOTHING`,
-      [category.slug, category.name, category.description, category.image, now],
-    );
-  }
+  await Promise.all(
+    categories.map(category =>
+      db.query(
+        `INSERT INTO categories (slug, name, description, image, created_at)
+         VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (slug) DO NOTHING`,
+        [category.slug, category.name, category.description, category.image, now],
+      ),
+    ),
+  );
+
+  await Promise.all(
+    catalogProducts.map(product =>
+      db.query(
+        `INSERT INTO products
+           (id, slug, sku, name, description, brand, category_slug, price_cents,
+            active, is_new, is_featured, tags, variants, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14)
+         ON CONFLICT (id) DO NOTHING`,
+        [
+          product.id, product.slug, product.sku, product.name, product.description,
+          product.brand, product.categorySlug, product.priceCents, true,
+          product.isNew, product.isFeatured, product.tags, product.variants, now,
+        ],
+      ),
+    ),
+  );
+
+  const [unbackfilledResult, existingImagesResult] = await Promise.all([
+    db.query("SELECT id FROM products WHERE slug = ''"),
+    db.query("SELECT DISTINCT product_id FROM product_images"),
+    ...catalogProducts.map(product =>
+      db.query(
+        `INSERT INTO inventory (product_id, quantity, reorder_point, updated_at)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (product_id) DO NOTHING`,
+        [product.id, product.stock, reorderPoint, now],
+      ),
+    ),
+  ]);
+
+  const unbackfilledIds = new Set(unbackfilledResult.rows.map(row => String(row.id)));
+  const seededImageIds = new Set(existingImagesResult.rows.map(row => String(row.product_id)));
+
+  const followUps: Promise<unknown>[] = [];
 
   for (const product of catalogProducts) {
-    await db.query(
-      `INSERT INTO products
-         (id, slug, sku, name, description, brand, category_slug, price_cents,
-          active, is_new, is_featured, tags, variants, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $14)
-       ON CONFLICT (id) DO NOTHING`,
-      [
-        product.id, product.slug, product.sku, product.name, product.description,
-        product.brand, product.categorySlug, product.priceCents, true,
-        product.isNew, product.isFeatured, product.tags, product.variants, now,
-      ],
-    );
-
-    // Backfill pre-existing rows created before the catalog columns existed.
-    await db.query(
-      `UPDATE products
-       SET slug = $2, description = $3, brand = $4, category_slug = $5,
-           is_new = $6, is_featured = $7, tags = $8, variants = $9
-       WHERE id = $1 AND slug = ''`,
-      [
-        product.id, product.slug, product.description, product.brand,
-        product.categorySlug, product.isNew, product.isFeatured,
-        product.tags, product.variants,
-      ],
-    );
-
-    await db.query(
-      `INSERT INTO inventory (product_id, quantity, reorder_point, updated_at)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (product_id) DO NOTHING`,
-      [product.id, product.stock, reorderPoint, now],
-    );
-
-    const seeded = await db.query(
-      "SELECT COUNT(*)::int AS n FROM product_images WHERE product_id = $1",
-      [product.id],
-    );
-    if (Number(seeded.rows[0].n) === 0) {
+    if (unbackfilledIds.has(product.id)) {
+      followUps.push(
+        db.query(
+          `UPDATE products
+           SET slug = $2, description = $3, brand = $4, category_slug = $5,
+               is_new = $6, is_featured = $7, tags = $8, variants = $9
+           WHERE id = $1 AND slug = ''`,
+          [
+            product.id, product.slug, product.description, product.brand,
+            product.categorySlug, product.isNew, product.isFeatured,
+            product.tags, product.variants,
+          ],
+        ),
+      );
+    }
+    if (!seededImageIds.has(product.id)) {
       for (let index = 0; index < product.gallery.length; index += 1) {
-        await db.query(
-          `INSERT INTO product_images (id, product_id, url, alt, position, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6)`,
-          [randomUUID(), product.id, product.gallery[index], product.name, index, now],
+        followUps.push(
+          db.query(
+            `INSERT INTO product_images (id, product_id, url, alt, position, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6)`,
+            [randomUUID(), product.id, product.gallery[index], product.name, index, now],
+          ),
         );
       }
     }
+  }
+
+  if (followUps.length) {
+    await Promise.all(followUps);
   }
 }

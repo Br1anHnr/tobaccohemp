@@ -78,6 +78,7 @@ export function Providers({
         initialCustomer.phone,
         initialCustomer.city,
         initialCustomer.state,
+        initialCustomer.addresses ?? [],
       ])
     : null;
   useEffect(() => {
@@ -97,6 +98,9 @@ export function Providers({
           hydrated: true,
         });
         return;
+      }
+      if (!initialCustomer) {
+        appliedCustomerKey.current = null;
       }
       useAccount.setState({ hydrated: true });
     });

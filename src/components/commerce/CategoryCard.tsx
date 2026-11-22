@@ -4,7 +4,7 @@ import { ArrowUpRight } from "lucide-react";
 import type { Category } from "@/types/category";
 export function CategoryCard({ category }: { category: Category }) {
   return (
-    <Link className="category-card" href={`/categoria/${category.slug}`}>
+    <Link className="category-card" href={`/categoria/${category.slug}`} prefetch={false}>
       <Image
         src={category.image}
         alt=""

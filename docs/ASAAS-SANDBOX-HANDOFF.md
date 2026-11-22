@@ -1,8 +1,18 @@
-# Asaas Sandbox — entrega isolada
+# Asaas Sandbox — entrega integrada com P0
 
-Base publicada: `18ae2b5`. Branch local: `sandbox/asaas-preview`. Não incorpora o P0 `41d6a5e`; não houve push, deploy, migration remota, acesso a credenciais compartilhadas, alteração de main, Preview existente, Docker, Neon/R2 existentes ou dados reais.
+Base integrada na branch `sandbox/asaas-preview`: combina o Preview Asaas Sandbox (`d2331bc` + `9ae28c6`) com o P0 de navegação, telefone obrigatório no cadastro, endereços persistidos (`customer_addresses`) e checkout simplificado (`41d6a5e`), mantendo `main`, produção e `homologacao/funcional-e2e` intactas.
 
-Implementação e testes: commit `d2331bc` (`feat(payments): add isolated Asaas Sandbox checkout and reconciliation`). Este relatório é entregue em commit documental separado.
+## Melhorias integradas após o teste real
+- **Diagnóstico sanitizado (`AsaasProviderError` + migration `006_asaas_sandbox_diagnostics`)**: status HTTP e `errors[].code` validados do Asaas são logados de forma sanitizada e persistidos em `asaas_sandbox_attempts` (`last_error_code`, `last_error_status`, `last_error_at`) sem vazar corpos brutos, PII ou chaves.
+- **Liberação de estoque e prevenção de pedidos presos**:
+  - `PAYMENT_OVERDUE` transiciona pedidos Pix para `expired`, liberando a reserva uma única vez (com reaquisição transacional em pagamento tardio).
+  - `POST /api/admin/asaas/cancel` permite ao papel `admin` cancelar tentativas não liquidadas (inclusive `uncertain`/`review`) **somente após consultar o Asaas** e confirmar que não há cobrança `RECEIVED`/`CONFIRMED`/estornada.
+  - Cartão hospedado aceita `externalReference` ausente ou string vazia `""` ao conciliar por `checkoutSession`.
+  - `AsaasSandboxCheckout` limpa o carrinho ao criar pedido, recupera handles `404` obsoletos em `sessionStorage`, libera `"Iniciar outro pedido de teste"` também para `canceled`, `expired`, `uncertain` e `review`, e exibe itens e diagnóstico.
+- **Histórico conectado e catálogo sincronizado**:
+  - `GET /api/auth/orders` alimenta `/conta` e `/conta/pedidos` com os pedidos reais da conta autenticada (preservando `demoOrders` apenas no modo demonstrativo).
+  - `/api/admin/orders/history` filtra exclusivamente pedidos demo (`is_demo = true AND payment_provider = 'demo'`).
+  - Mutações Sandbox revalidam o cache do catálogo público (`revalidateStorefrontCatalog()`).
 
 ## Contrato HTTP
 

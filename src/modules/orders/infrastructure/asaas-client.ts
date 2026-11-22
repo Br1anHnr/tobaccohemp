@@ -6,6 +6,19 @@ import { ASAAS_SANDBOX } from "@/lib/constants";
 export const ASAAS_SANDBOX_BASE = ASAAS_SANDBOX.apiBase;
 export const ASAAS_SANDBOX_CHECKOUT = ASAAS_SANDBOX.checkoutBase;
 
+export class AsaasProviderError extends AdminError {
+  constructor(
+    readonly httpStatus: number | null,
+    readonly providerCode: string,
+  ) {
+    super(
+      502,
+      "ASAAS_UNAVAILABLE",
+      "Asaas Sandbox indisponível. Consulte o pedido antes de tentar novamente.",
+    );
+  }
+}
+
 export function sandboxEnabled() {
   return process.env.ASAAS_SANDBOX_ENABLED === "1" &&
     process.env.ASAAS_SANDBOX_DATASET === "synthetic" && customerAuthEnabled() &&
@@ -42,12 +55,34 @@ export function checkoutUrl(id: string) {
   return `${ASAAS_SANDBOX_CHECKOUT}?id=${encodeURIComponent(resourceId(id))}`;
 }
 
+function extractProviderCode(status: number, payload: unknown): string {
+  if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+    const errors = (payload as { errors?: unknown }).errors;
+    if (Array.isArray(errors)) {
+      const codes = errors
+        .slice(0, 3)
+        .map((entry) =>
+          entry && typeof entry === "object" && typeof (entry as { code?: unknown }).code === "string"
+            ? (entry as { code: string }).code.trim()
+            : "",
+        )
+        .filter((code) => /^[A-Za-z0-9_.-]{1,64}$/.test(code));
+      if (codes.length > 0) {
+        return codes.join(",").slice(0, 120);
+      }
+    }
+  }
+  return `HTTP_${status}`;
+}
+
 export class AsaasClient {
   constructor(private readonly transport: typeof fetch = fetch) {}
 
   async request(path: string, body?: Record<string, unknown>): Promise<Record<string, unknown>> {
     const { key } = sandboxConfig();
     if (!/^\/(payments(?:[/?]|$)|checkouts$)/.test(path)) throw new Error("Unsupported Asaas resource");
+    let httpStatus: number | null = null;
+    let providerCode = "NETWORK_ERROR";
     try {
       const response = await this.transport(`${ASAAS_SANDBOX_BASE}${path}`, {
         method: body ? "POST" : "GET", redirect: "error", cache: "no-store",
@@ -55,13 +90,39 @@ export class AsaasClient {
         headers: { access_token: key, "Content-Type": "application/json", "User-Agent": "TobaccoHemp-Sandbox/1.0" },
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
-      if (!response.ok) throw new Error("Provider failure");
-      const value: unknown = await response.json();
-      if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid response");
+      httpStatus = response.status;
+      if (!response.ok) {
+        const errPayload: unknown = await response.json().catch(() => null);
+        providerCode = extractProviderCode(response.status, errPayload);
+        throw new AsaasProviderError(httpStatus, providerCode);
+      }
+      const value: unknown = await response.json().catch(() => null);
+      if (!value || typeof value !== "object" || Array.isArray(value)) {
+        providerCode = "INVALID_RESPONSE";
+        throw new AsaasProviderError(httpStatus, providerCode);
+      }
       return value as Record<string, unknown>;
-    } catch {
+    } catch (error) {
+      if (error instanceof AsaasProviderError) {
+        console.error("[asaas-sandbox] provider_error", {
+          method: body ? "POST" : "GET",
+          path: path.split("?")[0],
+          httpStatus: error.httpStatus,
+          providerCode: error.providerCode,
+        });
+        throw error;
+      }
+      if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) {
+        providerCode = "TIMEOUT";
+      }
       // No provider response bodies, request bodies, PII or keys in errors/logs.
-      throw new AdminError(502, "ASAAS_UNAVAILABLE", "Asaas Sandbox indisponível. Consulte o pedido antes de tentar novamente.");
+      console.error("[asaas-sandbox] provider_error", {
+        method: body ? "POST" : "GET",
+        path: path.split("?")[0],
+        httpStatus,
+        providerCode,
+      });
+      throw new AsaasProviderError(httpStatus, providerCode);
     }
   }
 }
