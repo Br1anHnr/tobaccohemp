@@ -12,6 +12,35 @@ const ALLOWED = new Map<string, string>([
   ["image/webp", "webp"],
 ]);
 
+/** Magic-byte signatures for the supported image formats. */
+const SIGNATURES: ReadonlyArray<{ mime: string; matches: (body: Buffer) => boolean }> = [
+  {
+    mime: "image/jpeg",
+    matches: body => body.length >= 3 && body[0] === 0xff && body[1] === 0xd8 && body[2] === 0xff,
+  },
+  {
+    mime: "image/png",
+    matches: body =>
+      body.length >= 8 &&
+      body.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+  },
+  {
+    mime: "image/webp",
+    matches: body =>
+      body.length >= 12 &&
+      body.subarray(0, 4).toString("ascii") === "RIFF" &&
+      body.subarray(8, 12).toString("ascii") === "WEBP",
+  },
+];
+
+/** Detect the effective image format from the file's magic bytes, or null. */
+export function detectImageFormat(body: Buffer): string | null {
+  for (const signature of SIGNATURES) {
+    if (signature.matches(body)) return signature.mime;
+  }
+  return null;
+}
+
 interface PreparedFile {
   fileName: string;
   body: Buffer;
@@ -22,9 +51,19 @@ async function prepareFile(file: File): Promise<PreparedFile> {
   const ext = ALLOWED.get(file.type);
   if (!ext) throw new AdminError(422, "VALIDATION", "Envie uma imagem JPEG, PNG ou WebP.");
   if (file.size > MAX_BYTES) throw new AdminError(422, "VALIDATION", "A imagem deve ter até 5 MB.");
+  const body = Buffer.from(await file.arrayBuffer());
+  // Validate the effective content, not just the declared MIME type, so bytes
+  // that do not belong to the declared format are rejected before any write.
+  const detected = detectImageFormat(body);
+  if (!detected) {
+    throw new AdminError(422, "VALIDATION", "O conteúdo enviado não é uma imagem JPEG, PNG ou WebP válida.");
+  }
+  if (detected !== file.type) {
+    throw new AdminError(422, "VALIDATION", "O conteúdo da imagem não corresponde ao formato declarado.");
+  }
   return {
     fileName: `${randomUUID()}.${ext}`,
-    body: Buffer.from(await file.arrayBuffer()),
+    body,
     contentType: file.type,
   };
 }

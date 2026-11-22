@@ -28,7 +28,7 @@ export interface AdminProduct {
   description: string;
   brand: string;
   category: string;
-  categorySlug: string;
+  categorySlug: string | null;
   price: number;
   stock: number;
   sold: number | null;

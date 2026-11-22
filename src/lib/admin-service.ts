@@ -63,7 +63,7 @@ export async function fetchProducts(): Promise<AdminProduct[]> {
       description: product.description,
       brand: product.brand,
       category: product.categoryName ?? "Sem categoria",
-      categorySlug: product.categorySlug ?? "sem-categoria",
+      categorySlug: product.categorySlug ?? null,
       price: product.priceCents / 100,
       stock: item.quantity,
       reorderPoint: item.reorderPoint,
@@ -179,7 +179,8 @@ export async function fetchDashboard(): Promise<DashboardMetrics> {
       { id: "customers", label: "Clientes cadastrados", value: String(metrics.customers), delta: null, direction: "up", hint },
       { id: "conversion", label: "Unidades em estoque", value: String(metrics.units), delta: null, direction: "up", hint },
     ],
-    salesSeries: [], categoryPerformance: [],
+    salesSeries: metrics.salesSeries ?? [],
+    categoryPerformance: metrics.categoryPerformance ?? [],
     lowStock: products.filter(product => product.active && !product.archived && product.stock <= (product.reorderPoint ?? 0)),
   };
 }

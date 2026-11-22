@@ -12,8 +12,11 @@ const PNG = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
   "base64",
 );
-// Distinct bytes used for the replace step (still served as image/png).
-const PNG_ALT = Buffer.from("tobacco-hemp-replaced-image-fixture");
+// Distinct valid 1×1 red PNG used for the replace step (still served as image/png).
+const PNG_ALT = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==",
+  "base64",
+);
 
 async function login(page: Page) {
   const response = await page.request.post("/api/admin/auth/login", {
@@ -31,6 +34,17 @@ async function deleteProduct(id: string) {
     // product_images and inventory are removed by FK cascade. The R2 objects
     // are removed by the image DELETE route during the test body itself.
     await pool.query("DELETE FROM products WHERE id = $1", [id]);
+  } finally {
+    await pool.end();
+  }
+}
+
+async function deleteCategoryBySlug(slug: string) {
+  const url = process.env.DATABASE_URL;
+  if (!url || !slug) return;
+  const pool = new Pool({ connectionString: url, max: 1 });
+  try {
+    await pool.query("DELETE FROM categories WHERE slug = $1", [slug]);
   } finally {
     await pool.end();
   }
@@ -121,6 +135,142 @@ test("cadastro, ciclo de imagem (upload/leitura/atualização/remoção) e refle
     expect(archived.status()).toBe(200);
     await page.goto(`/loja?q=${encodeURIComponent(name)}`);
     await expect(page.locator(".product-card").filter({ hasText: name })).toHaveCount(0);
+  } finally {
+    if (productId) await deleteProduct(productId);
+  }
+});
+
+test("remoção de categoria some da UI sem reload e persiste no SQL", async ({ page }, info) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const run = `${info.project.name}-${Date.now()}`.replace(/[^a-z0-9-]/gi, "-");
+  const slug = `cat-del-${run}`.slice(0, 64);
+  const name = `Categoria Remoção ${run}`;
+  try {
+    await login(page);
+
+    const created = await page.request.post("/api/admin/categories", {
+      headers: { Origin: ORIGIN },
+      data: { slug, name, description: "Categoria temporária para teste de remoção.", image: "" },
+    });
+    expect(created.status()).toBe(201);
+
+    await page.goto("/admin/categorias");
+    const row = page.locator(".admin-table tbody tr").filter({ hasText: name });
+    await expect(row).toHaveCount(1);
+
+    // Remove pela própria interface: o DELETE retorna um corpo de sucesso
+    // (`{ data: null }`), então o painel atualiza a lista sem exigir reload.
+    await row.getByRole("button", { name: `Remover categoria ${name}` }).click();
+    await expect(row).toHaveCount(0);
+
+    // O DELETE confirmou no banco e a lista continua sem a categoria após refresh.
+    const url = process.env.DATABASE_URL;
+    if (url) {
+      const pool = new Pool({ connectionString: url, max: 1 });
+      try {
+        const res = await pool.query("SELECT count(*)::int AS n FROM categories WHERE slug = $1", [slug]);
+        expect(Number(res.rows[0].n)).toBe(0);
+      } finally {
+        await pool.end();
+      }
+    }
+    await page.reload();
+    await expect(page.locator(".admin-table tbody tr").filter({ hasText: name })).toHaveCount(0);
+  } finally {
+    await deleteCategoryBySlug(slug);
+  }
+});
+
+test("edição de preço de produto sem categoria persiste sem corromper o valor ausente", async ({ page }, info) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  const run = `${info.project.name}-${Date.now()}`.replace(/[^A-Za-z0-9]/g, "-");
+  const sku = `NOCAT-${run}`.toUpperCase().slice(0, 32);
+  const name = `Produto Sem Categoria ${run}`;
+  let productId = "";
+  try {
+    await login(page);
+
+    // Cria sem categoria: o banco grava category_slug = NULL.
+    const created = await page.request.post("/api/admin/products", {
+      headers: { Origin: ORIGIN },
+      data: { name, sku, priceCents: 1990, active: true },
+    });
+    expect(created.status()).toBe(201);
+    productId = String((await created.json()).data.id);
+
+    await page.goto("/admin/produtos");
+    const row = page.locator(".admin-table tbody tr").filter({ hasText: name });
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText("Sem categoria");
+
+    // Edita apenas o preço pelo painel.
+    await row.getByRole("button", { name: `Editar ${name}` }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByLabel("Preço (R$)", { exact: true }).fill("39,90");
+    await dialog.getByRole("button", { name: "Salvar alterações" }).click();
+    await expect(dialog).toHaveCount(0);
+
+    // Sucesso reflete na linha, mantendo a categoria ausente.
+    await expect(row).toContainText(/39,90/);
+    await expect(row).toContainText("Sem categoria");
+
+    // Persiste após reload e o valor ausente continua ausente no banco.
+    await page.reload();
+    await expect(page.locator(".admin-table tbody tr").filter({ hasText: name })).toContainText(/39,90/);
+    const url = process.env.DATABASE_URL;
+    if (url) {
+      const pool = new Pool({ connectionString: url, max: 1 });
+      try {
+        const res = await pool.query(
+          "SELECT price_cents, category_slug FROM products WHERE id = $1",
+          [productId],
+        );
+        expect(Number(res.rows[0].price_cents)).toBe(3990);
+        expect(res.rows[0].category_slug).toBeNull();
+      } finally {
+        await pool.end();
+      }
+    }
+  } finally {
+    if (productId) await deleteProduct(productId);
+  }
+});
+
+test("upload de imagem rejeita conteúdo inválido e não grava registro", async ({ page }, info) => {
+  const run = `${info.project.name}-${Date.now()}`.replace(/[^A-Za-z0-9]/g, "-");
+  const sku = `IMG-${run}`.toUpperCase().slice(0, 32);
+  let productId = "";
+  try {
+    await login(page);
+
+    const created = await page.request.post("/api/admin/products", {
+      headers: { Origin: ORIGIN },
+      data: { name: `Produto Imagem ${run}`, sku, priceCents: 1990, active: true, categorySlug: "cases" },
+    });
+    expect(created.status()).toBe(201);
+    productId = String((await created.json()).data.id);
+
+    // Bytes que não são imagem, declarados como PNG: rejeitados antes de gravar.
+    const garbage = await page.request.post(`/api/admin/products/${productId}/images`, {
+      headers: { Origin: ORIGIN },
+      multipart: { file: { name: "fake.png", mimeType: "image/png", buffer: Buffer.from("isto não é uma imagem") } },
+    });
+    expect(garbage.status()).toBe(422);
+    expect((await garbage.json()).error.code).toBe("VALIDATION");
+
+    // PNG válido declarado como JPEG: conteúdo não corresponde ao formato declarado.
+    const mismatch = await page.request.post(`/api/admin/products/${productId}/images`, {
+      headers: { Origin: ORIGIN },
+      multipart: { file: { name: "real.png", mimeType: "image/jpeg", buffer: PNG } },
+    });
+    expect(mismatch.status()).toBe(422);
+    expect((await mismatch.json()).error.code).toBe("VALIDATION");
+
+    // Nenhum registro de imagem deve ter sido persistido após as rejeições.
+    const list = await page.request.get(`/api/admin/products/${productId}/images`);
+    expect(list.status()).toBe(200);
+    expect((await list.json()).data).toHaveLength(0);
   } finally {
     if (productId) await deleteProduct(productId);
   }

@@ -224,7 +224,7 @@ test("admin dashboard renders indicators and charts without overflow", async ({
   await page.goto("/admin");
   await expect(page.getByRole("heading", { name: /Painel/ })).toBeVisible();
   await expect(page.getByText("Valor em estoque", { exact: true })).toBeVisible();
-  await expect(page.getByText("Vendas desabilitadas — nenhum dado comercial conectado.")).toBeVisible();
+  await expect(page.getByText("Vendas reais desabilitadas — apenas pedidos demonstrativos.")).toBeVisible();
   await expect(page.locator(".kpi-card")).toHaveCount(4);
   await expect(page.locator(".chart-card")).toHaveCount(3);
   expect(

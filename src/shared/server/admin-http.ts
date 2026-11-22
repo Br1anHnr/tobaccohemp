@@ -41,7 +41,10 @@ export function adminRoute(handler: AdminHandler, options: { public?: boolean; s
       // `operator` by passing `{ role: "operator" }`.
       const user = options.public ? null : requireRole(await sessionUser(request.cookies.get(sessionCookie)?.value), options.role ?? "admin");
       const data = await handler(request, user);
-      const response = data instanceof NextResponse ? data : NextResponse.json({ data }, { status: options.status ?? 200 });
+      // Handlers that complete without a body (e.g. DELETE) serialize `data`
+      // as `null` instead of dropping the key, so the client can tell a
+      // successful empty response apart from a malformed one.
+      const response = data instanceof NextResponse ? data : NextResponse.json({ data: data ?? null }, { status: options.status ?? 200 });
       response.headers.set("Cache-Control", "no-store");
       response.headers.set("Vary", "Cookie");
       return response;

@@ -92,12 +92,12 @@ export function Dashboard() {
 
       <div className="chart-grid">
         <section className="chart-card">
-          <h2>Desempenho de vendas</h2>
-          <p>Vendas desabilitadas — nenhum dado comercial conectado.</p>
+          <h2>Volume demonstrativo</h2>
+          <p>Vendas reais desabilitadas — apenas pedidos demonstrativos.</p>
           {data.salesSeries.length > 0 ? <LineChart
             data={data.salesSeries}
-            ariaLabel="Gráfico de linha com a receita diária dos últimos 14 dias"
-          /> : <p className="table-state">Sem histórico de vendas nesta integração.</p>}
+            ariaLabel="Gráfico de linha com o volume demonstrativo diário dos últimos 14 dias"
+          /> : <p className="table-state">Nenhum pedido demonstrativo nesta janela.</p>}
         </section>
 
         <section className="chart-card">
@@ -107,12 +107,12 @@ export function Dashboard() {
         </section>
 
         <section className="chart-card is-full">
-          <h2>Receita por categoria</h2>
-          <p>Receitas e categorias comerciais não estão integradas.</p>
+          <h2>Volume demonstrativo por categoria</h2>
+          <p>Distribuição de pedidos demonstrativos — sem receita comercial.</p>
           {data.categoryPerformance.length > 0 ? <BarChart
             data={data.categoryPerformance}
-            ariaLabel="Gráfico de barras com a receita por categoria"
-          /> : <p className="table-state">Sem dados de receita por categoria.</p>}
+            ariaLabel="Gráfico de barras com o volume demonstrativo por categoria"
+          /> : <p className="table-state">Nenhum pedido demonstrativo por categoria.</p>}
         </section>
       </div>
     </>

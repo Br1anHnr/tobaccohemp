@@ -7,7 +7,6 @@ export interface Customer {
   status: CustomerStatus;
   createdAt: string;
 }
-export type CustomerInput = Pick<Customer, "name" | "email" | "status">;
 
 export interface ProductImage {
   id: string;
@@ -75,12 +74,22 @@ export interface InventoryItem {
 }
 export type InventoryInput = Pick<InventoryItem, "quantity" | "reorderPoint">;
 
+/** One point of a dashboard series. `value` is expressed in BRL reais. */
+export interface DashboardSeriesPoint {
+  label: string;
+  value: number;
+}
+
 export interface DashboardMetrics {
   customers: number;
   products: number;
   units: number;
   lowStockProducts: number;
   stockValueCents: number;
+  /** Daily demonstrative order volume over the trailing window (empty when none). */
+  salesSeries: DashboardSeriesPoint[];
+  /** Demonstrative order volume grouped by category (empty when none). */
+  categoryPerformance: DashboardSeriesPoint[];
 }
 
 /** Minimal role-based access control. `admin` implies every `operator` capability. */
