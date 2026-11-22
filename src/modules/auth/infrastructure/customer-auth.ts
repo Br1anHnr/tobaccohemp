@@ -5,6 +5,8 @@ import { AdminError, duplicate } from "@/shared/server/validation";
 import { profileInput, resetInput, signInInput, signUpInput } from "@/modules/customers/domain/customer-account-input";
 import * as accounts from "@/modules/customers/infrastructure/customer-accounts";
 import { hashPassword, verifyPassword } from "@/modules/customers/infrastructure/password";
+import { localAuthEnabled } from "@/shared/server/preview";
+import { deliverPasswordReset, passwordMailEndpoint } from "./password-mail";
 
 export const customerSessionCookie = "th_customer_session";
 export const customerSessionSeconds = 7 * 24 * 60 * 60; // 7 days
@@ -79,12 +81,13 @@ export async function requestCustomerPasswordReset(value: unknown, db: Db = pool
   const raw = value as { email?: unknown } | null | undefined;
   const email = raw && typeof raw.email === "string" ? raw.email.trim().toLowerCase() : "";
   if (!emailRe.test(email)) return generic;
+  const local = localAuthEnabled();
+  if (!local) passwordMailEndpoint();
   const record = await accounts.findCustomerByEmail(email, db);
   if (!record) return generic;
   const token = accounts.newOpaqueToken();
   await accounts.createPasswordReset(record.id, sha256(token), new Date(Date.now() + passwordResetSeconds * 1000), db);
-  // No email delivery exists yet: expose the token only in local environments.
-  const local = ["development", "test"].includes(process.env.NODE_ENV ?? "");
+  if (!local) await deliverPasswordReset(email, token);
   return local ? { ...generic, resetToken: token } : generic;
 }
 

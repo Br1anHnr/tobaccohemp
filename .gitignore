@@ -1,6 +1,8 @@
 node_modules/
 .next/
 .next-integration/
+.next-preview/
+.preview-validation/
 out/
 test-results/
 playwright-report/

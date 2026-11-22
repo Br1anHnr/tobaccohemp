@@ -14,7 +14,7 @@ function r2RemotePatterns() {
 const config: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
-  distDir: process.env.ADMIN_INTEGRATION_TEST === "1" ? ".next-integration" : ".next",
+  distDir: process.env.PREVIEW_VALIDATION === "1" ? ".next-preview" : process.env.ADMIN_INTEGRATION_TEST === "1" ? ".next-integration" : ".next",
   images: {
     remotePatterns: r2RemotePatterns(),
   },

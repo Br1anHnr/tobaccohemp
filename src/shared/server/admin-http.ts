@@ -3,6 +3,7 @@ import type { AdminRole, AdminUser } from "@/shared/contracts/admin";
 import { requireRole, sessionCookie, sessionUser } from "@/modules/auth";
 import { ensureSchema } from "./migrate";
 import { AdminError } from "./validation";
+import { mutationOrigin, previewOrigin, secureSession } from "./preview";
 
 export type AdminHandler = (request: NextRequest, user: AdminUser | null) => unknown | Promise<unknown>;
 
@@ -15,8 +16,7 @@ export function isAdminProduction(): boolean {
 
 /** Session cookies must be Secure over HTTPS (the only protocol used in production). */
 export function isSecureRequest(request: NextRequest): boolean {
-  const forwarded = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
-  return request.nextUrl.protocol === "https:" || forwarded === "https";
+  return secureSession(request);
 }
 
 export function adminRoute(handler: AdminHandler, options: { public?: boolean; status?: number; role?: AdminRole } = {}) {
@@ -24,14 +24,15 @@ export function adminRoute(handler: AdminHandler, options: { public?: boolean; s
     try {
       // The 503 lock stays by default outside development/test. It is released
       // only by an explicit deploy-time opt-in, never unconditionally.
-      if (isAdminProduction() && process.env.ADMIN_ENABLED !== "1") {
-        throw new AdminError(503, "UNAVAILABLE", "Backend administrativo desabilitado em produção. Defina ADMIN_ENABLED=1 para habilitar.");
+      if ((process.env.VERCEL_ENV === "preview" && !previewOrigin()) ||
+          (isAdminProduction() && process.env.ADMIN_ENABLED !== "1" && !previewOrigin())) {
+        throw new AdminError(503, "UNAVAILABLE", "Backend administrativo desabilitado neste ambiente.");
       }
       if (!["GET", "HEAD"].includes(request.method)) {
         // Do not trust forwarded-host headers supplied by callers.
         const origin = request.headers.get("origin");
         // Next normalizes loopback URLs to localhost; Host preserves the browser's origin.
-        const expectedOrigin = `${request.nextUrl.protocol}//${request.headers.get("host")}`;
+        const expectedOrigin = mutationOrigin(request);
         if (!origin || origin !== expectedOrigin || request.headers.get("sec-fetch-site") === "cross-site") {
           throw new AdminError(403, "INVALID_ORIGIN", "Origem inválida.");
         }

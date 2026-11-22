@@ -1,3 +1,4 @@
+import { secureSession } from "@/shared/server/preview";
 import { NextResponse } from "next/server";
 import { signInCustomer, invalidateCustomerSession, customerSessionCookie, customerSessionSeconds } from "@/modules/auth";
 import { adminMutation } from "@/shared/server/admin-mutation";
@@ -11,7 +12,7 @@ export const POST = customerRoute(async request => {
   const response = NextResponse.json({ data: account });
   response.cookies.set(customerSessionCookie, token, {
     httpOnly: true, sameSite: "lax", path: "/", maxAge: customerSessionSeconds,
-    secure: request.nextUrl.protocol === "https:",
+    secure: secureSession(request),
   });
   return response;
 }, { public: true });

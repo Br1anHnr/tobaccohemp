@@ -4,6 +4,7 @@ import { customerSessionCookie, customerSessionUser } from "@/modules/auth";
 import { jsonInput } from "./admin-http";
 import { ensureSchema } from "./migrate";
 import { AdminError } from "./validation";
+import { customerAuthEnabled, mutationOrigin } from "./preview";
 
 export type CustomerHandler = (
   request: NextRequest,
@@ -20,12 +21,12 @@ export function customerRoute(
 ) {
   return async (request: NextRequest) => {
     try {
-      if (!["development", "test"].includes(process.env.NODE_ENV ?? "")) {
-        throw new AdminError(503, "UNAVAILABLE", "Autenticação de clientes disponível apenas em desenvolvimento local.");
+      if (!customerAuthEnabled()) {
+        throw new AdminError(503, "UNAVAILABLE", "Autenticação de clientes desabilitada neste ambiente.");
       }
       if (!["GET", "HEAD"].includes(request.method)) {
         const origin = request.headers.get("origin");
-        const expectedOrigin = `${request.nextUrl.protocol}//${request.headers.get("host")}`;
+        const expectedOrigin = mutationOrigin(request);
         if (!origin || origin !== expectedOrigin || request.headers.get("sec-fetch-site") === "cross-site") {
           throw new AdminError(403, "INVALID_ORIGIN", "Origem inválida.");
         }

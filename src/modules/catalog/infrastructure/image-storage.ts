@@ -1,6 +1,7 @@
 import { mkdir, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { DeleteObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { AdminError } from "@/shared/server/validation";
 
 /**
  * Storage de imagens. Abstrai onde os arquivos são persistidos para que o
@@ -92,6 +93,9 @@ function resolveImageStorage(): ImageStorage {
       bucket: R2_BUCKET,
       publicUrl: R2_PUBLIC_URL,
     });
+  }
+  if (process.env.VERCEL || !["development", "test"].includes(process.env.NODE_ENV ?? "")) {
+    throw new AdminError(503, "STORAGE_NOT_CONFIGURED", "Configure storage R2 persistente completo para gerenciar imagens.");
   }
   return new LocalImageStorage();
 }

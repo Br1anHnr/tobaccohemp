@@ -3,15 +3,16 @@ import { cookies } from "next/headers";
 import { customerSessionCookie, customerSessionUser } from "@/modules/auth";
 import { ensureSchema } from "@/shared/server/migrate";
 import type { CustomerProfile } from "@/types/account";
+import { customerAuthEnabled } from "@/shared/server/preview";
 
 /**
  * Resolves the signed-in storefront customer on the server from the httpOnly
- * session cookie. Returns null for guests, outside local/test auth mode, or
+ * session cookie. Returns null for guests, outside authorized auth mode, or
  * when no database is configured — without exposing tokens or failing the page.
  */
 export const getStorefrontCustomer = cache(
   async (): Promise<CustomerProfile | null> => {
-    if (!["development", "test"].includes(process.env.NODE_ENV ?? "")) {
+    if (!customerAuthEnabled()) {
       return null;
     }
     if (!process.env.DATABASE_URL) {
