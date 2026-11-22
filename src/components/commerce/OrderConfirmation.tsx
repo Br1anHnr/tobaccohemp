@@ -5,7 +5,6 @@ import { useOrder } from "@/store/order-store";
 import { STORAGE } from "@/lib/constants";
 import { currency } from "@/lib/currency";
 import {
-  ORDER_CHANNEL_LABEL,
   ORDER_PAYMENT_METHOD_LABEL,
   ORDER_STATUS_LABEL,
 } from "@/modules/orders/domain/order-status";
@@ -58,8 +57,7 @@ export function OrderConfirmation() {
       {order ? (
         <>
           <p>
-            Seu pedido demonstrativo <strong>{order.number}</strong> foi
-            recebido.
+            Seu pedido <strong>{order.number}</strong> foi recebido.
           </p>
           <div className="receipt">
             <span>{order.count} itens</span>
@@ -70,21 +68,11 @@ export function OrderConfirmation() {
           {order.status && (
             <div className="confirmation-meta">
               <span className="confirmation-pill">
-                Status: {ORDER_STATUS_LABEL[order.status]} (demo)
+                Status: {ORDER_STATUS_LABEL[order.status]}
               </span>
-              {order.channel && (
-                <span className="confirmation-pill">
-                  {ORDER_CHANNEL_LABEL[order.channel]}
-                </span>
-              )}
               {order.paymentMethod && (
                 <span className="confirmation-pill">
                   {ORDER_PAYMENT_METHOD_LABEL[order.paymentMethod]}
-                </span>
-              )}
-              {order.provider && (
-                <span className="confirmation-pill">
-                  Provedor: {order.provider} (desacoplado)
                 </span>
               )}
             </div>
@@ -95,7 +83,7 @@ export function OrderConfirmation() {
               <p>{order.providerNotice}</p>
               {order.providerReference && (
                 <p className="confirmation-ref">
-                  Referência sandbox: <code>{order.providerReference}</code>
+                  Código de referência: <code>{order.providerReference}</code>
                 </p>
               )}
               {order.pixCopyPaste && (
@@ -112,7 +100,7 @@ export function OrderConfirmation() {
                     }}
                   >
                     <Copy size={14} aria-hidden="true" />
-                    {copied ? "Código copiado" : "Copiar código demo"}
+                    {copied ? "Código copiado" : "Copiar código"}
                   </button>
                 </div>
               )}
@@ -121,7 +109,7 @@ export function OrderConfirmation() {
 
           {order.items && order.items.length > 0 && (
             <details className="confirmation-details">
-              <summary>Ver itens, valores congelados e histórico</summary>
+              <summary>Ver itens e histórico do pedido</summary>
               <ul className="confirmation-items">
                 {order.items.map((item) => (
                   <li key={`${item.productId}:${item.variant ?? ""}`}>
@@ -157,7 +145,7 @@ export function OrderConfirmation() {
           </p>
         </>
       ) : (
-        <p>Finalize um checkout demonstrativo para ver sua confirmação aqui.</p>
+        <p>Finalize um pedido no checkout para ver sua confirmação aqui.</p>
       )}
       <ButtonLink href="/loja">Continuar explorando</ButtonLink>
     </div>

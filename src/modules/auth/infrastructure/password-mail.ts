@@ -10,7 +10,7 @@ export function passwordMailEndpoint(): URL {
     if (endpoint.protocol !== "http:" || !["localhost", "127.0.0.1", "[::1]"].includes(endpoint.hostname) ||
         endpoint.username || endpoint.password || endpoint.pathname !== "/" || endpoint.search || endpoint.hash || !origin) throw new Error();
   } catch {
-    throw new AdminError(503, "MAIL_NOT_CONFIGURED", "Recuperação de senha indisponível neste ambiente de homologação.");
+    throw new AdminError(503, "MAIL_NOT_CONFIGURED", "Recuperação de senha por e-mail ainda não está configurada neste ambiente.");
   }
   return endpoint;
 }

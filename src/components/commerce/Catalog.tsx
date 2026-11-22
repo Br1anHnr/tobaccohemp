@@ -23,10 +23,14 @@ export function Catalog({ categorySlug }: { categorySlug?: string }) {
   const sort = params.get("ordem") ?? "destaques";
   const query = params.get("q") ?? "";
   const needle = normalize(query.trim());
-  const requestedMax = Number(params.get("preco") ?? 200);
+  const catalogMaxPrice = useMemo(
+    () => Math.max(200, Math.ceil(Math.max(0, ...products.map((p) => p.price)) / 10) * 10),
+    [products],
+  );
+  const requestedMax = Number(params.get("preco") ?? catalogMaxPrice);
   const maxPrice = Number.isFinite(requestedMax)
-    ? Math.max(0, Math.min(200, requestedMax))
-    : 200;
+    ? Math.max(0, Math.min(catalogMaxPrice, requestedMax))
+    : catalogMaxPrice;
   const change = (key: string, value: string) => {
     const next = new URLSearchParams(params.toString());
     if (value) next.set(key, value);
@@ -75,7 +79,7 @@ export function Catalog({ categorySlug }: { categorySlug?: string }) {
           },
         ]
       : []),
-    ...(maxPrice < 200
+    ...(maxPrice < catalogMaxPrice
       ? [
           {
             key: "preco",
@@ -250,7 +254,7 @@ export function Catalog({ categorySlug }: { categorySlug?: string }) {
             <input
               type="range"
               min="0"
-              max="200"
+              max={catalogMaxPrice}
               step="5"
               value={maxPrice}
               onChange={(e) => change("preco", e.target.value)}

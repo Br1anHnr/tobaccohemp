@@ -3,23 +3,23 @@ import { Header } from "@/components/layout/Header";
 import { UtilityBar } from "@/components/layout/UtilityBar";
 import { Footer } from "@/components/layout/Footer";
 import { getStorefrontCategories, getStorefrontProducts } from "@/lib/storefront";
-import { getStorefrontCustomer } from "@/lib/storefront-session";
+import { customerAuthEnabled } from "@/shared/server/preview";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 export default async function StoreLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  const [products, categories, initialCustomer] = await Promise.all([
+  const [products, categories] = await Promise.all([
     getStorefrontProducts(),
     getStorefrontCategories(),
-    getStorefrontCustomer(),
   ]);
+  const authAvailable = customerAuthEnabled() && Boolean(process.env.DATABASE_URL);
   return (
     <Providers
       products={products}
       categories={categories}
-      initialCustomer={initialCustomer}
+      authAvailable={authAvailable}
     >
       <a href="#main-content" className="skip-link">
         Pular para o conteúdo

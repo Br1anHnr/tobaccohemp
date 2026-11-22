@@ -1,5 +1,5 @@
 import { cache } from "react";
-import { revalidateTag, unstable_cache } from "next/cache";
+import { revalidatePath, revalidateTag, unstable_cache } from "next/cache";
 import { pool } from "@/shared/server/database";
 import { ensureSchema } from "@/shared/server/migrate";
 import { products as staticProducts } from "@/data/products";
@@ -72,9 +72,19 @@ async function queryPublicCatalog(): Promise<{ products: Product[]; categories: 
        ORDER BY p.created_at, p.id`,
     ),
     // Only categories with at least one visible product are surfaced in the
-    // storefront navigation; empty categories stay out of the way.
+    // storefront navigation; fallback to the first active product image when blank.
     db.query(
-      `SELECT c.slug, c.name, c.description, c.image
+      `SELECT c.slug, c.name, c.description,
+              COALESCE(
+                NULLIF(c.image, ''),
+                (SELECT pi.url
+                 FROM products p2
+                 JOIN product_images pi ON pi.product_id = p2.id
+                 WHERE p2.category_slug = c.slug AND p2.active = true AND p2.archived_at IS NULL
+                 ORDER BY p2.created_at, pi.position, pi.created_at
+                 LIMIT 1),
+                ''
+              ) AS image
        FROM categories c
        WHERE EXISTS (
          SELECT 1 FROM products p
@@ -97,7 +107,7 @@ async function queryPublicCatalog(): Promise<{ products: Product[]; categories: 
 
 const getCachedPublicCatalog = unstable_cache(
   queryPublicCatalog,
-  ["storefront-public-catalog-v1"],
+  ["storefront-public-catalog-v2"],
   {
     tags: [STOREFRONT_CATALOG_TAG],
     revalidate: 60,
@@ -108,6 +118,7 @@ const getCachedPublicCatalog = unstable_cache(
 export function revalidateStorefrontCatalog(): void {
   try {
     revalidateTag(STOREFRONT_CATALOG_TAG, { expire: 0 });
+    revalidatePath("/", "layout");
   } catch {
     // Outside a Next.js request lifecycle (e.g. standalone scripts).
   }

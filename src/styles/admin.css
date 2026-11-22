@@ -624,6 +624,33 @@ table.admin-table {
   margin-top: 2px;
 }
 
+.admin-product-cell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+  background: #0e0e0d;
+  flex-shrink: 0;
+}
+
+.admin-thumb--empty {
+  display: grid;
+  place-items: center;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-align: center;
+  line-height: 1.1;
+}
+
 /* Badges de status ----------------------------------------------------- */
 .badge-status {
   display: inline-flex;

@@ -7,7 +7,7 @@ import { PageIntro } from "@/components/layout/PageIntro";
 import { Catalog } from "@/components/commerce/Catalog";
 import { ProductGridSkeleton } from "@/components/ui/Skeleton";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 export async function generateMetadata({
   params,

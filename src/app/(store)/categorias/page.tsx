@@ -4,7 +4,7 @@ import { PageIntro } from "@/components/layout/PageIntro";
 import { CategoryCard } from "@/components/commerce/CategoryCard";
 import { getStorefrontCategories } from "@/lib/storefront";
 export const metadata: Metadata = { title: "Categorias" };
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 export default async function CategoriesPage() {
   const categories = await getStorefrontCategories();
   return (

@@ -25,7 +25,7 @@ export function CartSummary({ checkout = false }: { checkout?: boolean }) {
           Finalizar pedido
         </ButtonLink>
       )}
-      <small>Preços demonstrativos. A entrega não está incluída.</small>
+      <small>Entrega a combinar na confirmação do pedido.</small>
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { Search, ArrowUpRight, X } from "lucide-react";
+import { Search, ArrowUpRight, Package, X } from "lucide-react";
 import { useCatalog } from "@/store/catalog-store";
 import { normalize } from "@/lib/utils";
 import { currency } from "@/lib/currency";
@@ -131,7 +131,13 @@ export function SearchOverlay() {
             href={`/produto/${p.slug}`}
             onClick={() => open(null)}
           >
-            <Image src={p.image} alt="" width={64} height={64} sizes="64px" />
+            {p.image ? (
+              <Image src={p.image} alt="" width={64} height={64} sizes="64px" />
+            ) : (
+              <div className="media-placeholder media-placeholder--search" aria-hidden="true">
+                <Package size={18} strokeWidth={1.4} />
+              </div>
+            )}
             <span>
               <strong>{p.name}</strong>
               <small>{p.category}</small>

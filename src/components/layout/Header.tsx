@@ -37,7 +37,6 @@ export function Header() {
               <Link
                 key={item.label}
                 href={item.href}
-                prefetch={item.href === "/" ? undefined : false}
                 aria-current={active ? "page" : undefined}
               >
                 {item.label}

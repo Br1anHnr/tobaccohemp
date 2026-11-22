@@ -36,7 +36,7 @@ export function CartDrawer() {
               <span>Subtotal</span>
               <strong>{currency(cartTotal(items))}</strong>
             </p>
-            <small>Entrega a combinar no checkout demonstrativo.</small>
+            <small>Entrega a combinar no checkout.</small>
             <Link
               href="/checkout"
               className="button button-primary w-full"

@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { AdminShell } from "@/components/admin/AdminShell";
+import { sandboxEnabled } from "@/modules/orders/infrastructure/asaas-client";
 import "@/styles/admin.css";
+
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Painel administrativo",
@@ -9,5 +12,5 @@ export const metadata: Metadata = {
 export default function AdminLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
-  return <AdminShell>{children}</AdminShell>;
+  return <AdminShell sandboxEnabled={sandboxEnabled()}>{children}</AdminShell>;
 }

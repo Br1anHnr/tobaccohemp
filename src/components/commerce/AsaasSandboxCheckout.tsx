@@ -2,29 +2,41 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import { ArrowRight } from "lucide-react";
 import { useCart } from "@/store/cart-store";
 import { useAccount } from "@/store/account-store";
-import { Button } from "@/components/ui/Button";
+import { Button, ButtonLink } from "@/components/ui/Button";
 import { currency } from "@/lib/currency";
-import { ASAAS_SANDBOX } from "@/lib/constants";
 import { ORDER_STATUS_LABEL, ORDER_STOCK_STATUS_LABEL } from "@/modules/orders/domain/order-status";
 import type { sandboxPaymentView } from "@/modules/orders/infrastructure/asaas-sandbox";
 
-type Payment = Awaited<ReturnType<typeof sandboxPaymentView>>;
+export type SandboxPaymentData = Awaited<ReturnType<typeof sandboxPaymentView>>;
 const handleKey = "th-asaas-sandbox-attempt";
 
-export function AsaasSandboxCheckout() {
+export function AsaasSandboxCheckout({
+  beforeCreate,
+  onPaymentChange,
+  onResetNotice,
+}: {
+  beforeCreate?: () => Promise<boolean>;
+  onPaymentChange?: (payment: SandboxPaymentData | null) => void;
+  onResetNotice?: (notice: string) => void;
+}) {
   const items = useCart(s => s.items);
   const clearCart = useCart(s => s.clear);
   const customer = useAccount(s => s.customer);
   const [method, setMethod] = useState<"pix" | "card">("pix");
-  const [payment, setPayment] = useState<Payment | null>(null);
+  const [payment, setPayment] = useState<SandboxPaymentData | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [hasSavedOrder, setHasSavedOrder] = useState(false);
   const key = useRef<string | null>(null);
   const orderId = useRef<string | null>(null);
   const lock = useRef(false);
+
+  useEffect(() => {
+    onPaymentChange?.(payment);
+  }, [payment, onPaymentChange]);
 
   const resetAttempt = useCallback((notice = "") => {
     try {
@@ -37,16 +49,17 @@ export function AsaasSandboxCheckout() {
     setHasSavedOrder(false);
     setPayment(null);
     setMessage(notice);
+    onResetNotice?.(notice);
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("asaasOrder")) {
       window.history.replaceState(null, "", "/checkout");
     }
-  }, []);
+  }, [onResetNotice]);
 
   const load = useCallback(async (id: string) => {
     const response = await fetch(`/api/checkout/asaas/${encodeURIComponent(id)}`, { cache: "no-store" });
     const body = await response.json().catch(() => null);
     if (response.status === 404) {
-      resetAttempt("Tentativa anterior não pertence a esta conta ou não foi encontrada. Você pode iniciar um novo pedido.");
+      resetAttempt("Pedido anterior não encontrado nesta conta. Você pode iniciar um novo pedido.");
       return;
     }
     if (!response.ok) throw new Error(body?.error?.message ?? "Falha ao consultar pedido.");
@@ -74,6 +87,10 @@ export function AsaasSandboxCheckout() {
     setBusy(true);
     setMessage("");
     try {
+      if (!orderId.current && beforeCreate) {
+        const ready = await beforeCreate();
+        if (!ready) return;
+      }
       key.current ??= crypto.randomUUID();
       sessionStorage.setItem(handleKey, JSON.stringify({ key: key.current, orderId: orderId.current }));
       if (orderId.current) {
@@ -86,15 +103,15 @@ export function AsaasSandboxCheckout() {
         body: JSON.stringify({ items, paymentMethod: method, idempotencyKey: key.current }),
       });
       const body = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(body?.error?.message ?? "Falha ao criar pedido Sandbox.");
-      const data = body.data as Payment;
+      if (!response.ok) throw new Error(body?.error?.message ?? "Não foi possível registrar o pedido.");
+      const data = body.data as SandboxPaymentData;
       orderId.current = data.order.id;
       setHasSavedOrder(true);
       sessionStorage.setItem(handleKey, JSON.stringify({ key: key.current, orderId: orderId.current }));
       setPayment(data);
       clearCart();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Falha no Sandbox.");
+      setMessage(error instanceof Error ? error.message : "Não foi possível concluir a operação.");
     } finally {
       setBusy(false);
       lock.current = false;
@@ -106,74 +123,129 @@ export function AsaasSandboxCheckout() {
     (["paid", "refunded", "canceled", "expired"].includes(payment!.order.status) ||
       ["uncertain", "review"].includes(payment!.attemptState));
 
+  const showPixFallbackNotice =
+    Boolean(payment) &&
+    (payment!.warning ||
+      (payment!.order.paymentMethod === "pix" &&
+        payment!.order.status === "pending_payment" &&
+        payment!.attemptState === "ready" &&
+        !payment!.pix));
+
   return (
-    <section className="summary-panel asaas-checkout" aria-label="Asaas Sandbox">
-      <p className="eyebrow">{ASAAS_SANDBOX.notice}</p>
-      <h2>Teste de pagamento</h2>
-      <p>Use apenas conta e acessórios sintéticos autorizados. O cartão é informado na página hospedada pelo Asaas.</p>
+    <section className="asaas-checkout-card" aria-label="Pagamento do pedido">
       {!customer ? (
-        <p><Link href="/conta/entrar" className="text-link">Entre com sua conta de teste</Link> para continuar.</p>
+        <div className="checkout-section checkout-guest-prompt">
+          <p>Entre na sua conta ou crie um cadastro para finalizar o pedido.</p>
+          <div className="checkout-guest-actions">
+            <ButtonLink href="/conta/entrar">Entrar na conta</ButtonLink>
+            <ButtonLink href="/conta/cadastro" variant="secondary">Criar conta</ButtonLink>
+          </div>
+        </div>
       ) : (
         <>
           {!payment && !hasSavedOrder && (
-            <fieldset disabled={busy}>
-              <legend>Forma de pagamento Sandbox</legend>
-              <label className="checkout-choice">
-                <input type="radio" name="asaas-method" checked={method === "pix"} onChange={() => setMethod("pix")} /> Pix dinâmico Sandbox
-              </label>
-              <label className="checkout-choice">
-                <input type="radio" name="asaas-method" checked={method === "card"} onChange={() => setMethod("card")} /> Cartão hospedado Sandbox
-              </label>
+            <fieldset className="checkout-section checkout-payment-section" disabled={busy}>
+              <legend>Forma de pagamento</legend>
+              <div className="checkout-choice-grid">
+                <label className="checkout-choice" htmlFor="asaas-method-pix">
+                  <input
+                    id="asaas-method-pix"
+                    type="radio"
+                    name="asaas-method"
+                    checked={method === "pix"}
+                    onChange={() => setMethod("pix")}
+                  />
+                  <span>
+                    <strong>Pix</strong>
+                    <small>QR Code e código Pix Copia e Cola gerados na hora (ambiente de testes).</small>
+                  </span>
+                </label>
+                <label className="checkout-choice" htmlFor="asaas-method-card">
+                  <input
+                    id="asaas-method-card"
+                    type="radio"
+                    name="asaas-method"
+                    checked={method === "card"}
+                    onChange={() => setMethod("card")}
+                  />
+                  <span>
+                    <strong>Cartão de crédito</strong>
+                    <small>Pagamento em ambiente seguro externo — nenhum dado do cartão é digitado neste site.</small>
+                  </span>
+                </label>
+              </div>
             </fieldset>
           )}
+
           {payment && (
-            <div className="asaas-payment-details" aria-live="polite">
-              <h3>{payment.order.orderNumber}</h3>
-              <p>{ORDER_STATUS_LABEL[payment.order.status]} · {currency(payment.order.totalCents / 100)}</p>
-              <p>{ORDER_STOCK_STATUS_LABEL[payment.order.stockStatus ?? "none"]}</p>
+            <div className="summary-panel asaas-payment-details" aria-live="polite">
+              <h2>Pedido {payment.order.orderNumber}</h2>
+              <p>
+                {ORDER_STATUS_LABEL[payment.order.status]} · {currency(payment.order.totalCents / 100)}
+              </p>
+              <p className="muted">{ORDER_STOCK_STATUS_LABEL[payment.order.stockStatus ?? "none"]}</p>
+
               {payment.attemptState !== "ready" && (
                 <p role="status">
                   {payment.attemptState === "review"
-                    ? "Pedido em revisão. Aguarde a conciliação do responsável pelo Sandbox."
-                    : "Tentativa registrada. Consulte este pedido para conciliar ou inicie outro pedido se a tentativa falhou."}
+                    ? "Pedido em análise. Aguarde a validação do atendimento."
+                    : "Pedido em processamento. Atualize o status abaixo para acompanhar a confirmação."}
                 </p>
               )}
-              {payment.warning && (
+
+              {showPixFallbackNotice && (
                 <p role="status">
-                  Não foi possível concluir a consulta ao provedor. Tente consultar novamente.
-                  {payment.diagnostic ? ` (Diagnóstico: ${payment.diagnostic.code}${payment.diagnostic.httpStatus ? ` · HTTP ${payment.diagnostic.httpStatus}` : ""})` : ""}
+                  Pedido registrado. O QR Code Pix está temporariamente indisponível nesta conta de testes; atualize o status abaixo ou tente novamente após ativação da chave Pix.
                 </p>
               )}
-              {!payment.warning && payment.diagnostic && (
-                <p role="status">
-                  Diagnóstico do provedor: {payment.diagnostic.code}
-                  {payment.diagnostic.httpStatus ? ` (HTTP ${payment.diagnostic.httpStatus})` : ""}
-                </p>
-              )}
+
               {payment.pix && (
                 <div className="asaas-qr">
-                  <Image unoptimized src={`data:image/png;base64,${payment.pix.encodedImage}`} alt="QR Code Pix dinâmico do pedido de teste Sandbox" width={240} height={240} />
-                  <label className="asaas-code">Pix Copia e Cola<textarea readOnly value={payment.pix.payload} aria-label="Pix Copia e Cola" /></label>
+                  <Image
+                    unoptimized
+                    src={`data:image/png;base64,${payment.pix.encodedImage}`}
+                    alt="QR Code Pix do pedido"
+                    width={240}
+                    height={240}
+                  />
+                  <label className="asaas-code">
+                    Pix Copia e Cola
+                    <textarea readOnly value={payment.pix.payload} aria-label="Pix Copia e Cola" />
+                  </label>
                   <Button
                     type="button"
                     variant="secondary"
                     onClick={async () => {
                       try {
                         await navigator.clipboard.writeText(payment.pix!.payload);
-                        setMessage("Código Pix Sandbox copiado.");
+                        setMessage("Código Pix copiado.");
                       } catch {
                         setMessage("Selecione e copie o código no campo acima.");
                       }
                     }}
                   >
-                    Copiar código Pix Sandbox
+                    Copiar código Pix
                   </Button>
-                  <p>Validade informada pelo Asaas: {payment.pix.expirationDate}</p>
+                  <p className="muted">Validade: {payment.pix.expirationDate}</p>
                 </div>
               )}
-              {payment.order.checkoutUrl && payment.order.status === "pending_payment" && payment.attemptState === "ready" && !payment.warning && (
-                <p><a className="button button-primary" href={payment.order.checkoutUrl} target="_blank" rel="noreferrer">Abrir cartão no Asaas Sandbox</a></p>
-              )}
+
+              {payment.order.checkoutUrl &&
+                payment.order.status === "pending_payment" &&
+                payment.attemptState === "ready" &&
+                !payment.warning && (
+                  <p>
+                    <a
+                      className="button button-primary"
+                      href={payment.order.checkoutUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Pagar com cartão <ArrowRight size={17} aria-hidden="true" />
+                    </a>
+                  </p>
+                )}
+
               {payment.order.items.length > 0 && (
                 <>
                   <h3>Itens do pedido</h3>
@@ -186,24 +258,51 @@ export function AsaasSandboxCheckout() {
                   </ul>
                 </>
               )}
+
               <h3>Histórico do pedido</h3>
-              <ul>{payment.order.history.map(h => <li key={h.id}>{ORDER_STATUS_LABEL[h.toStatus]} — {h.reason}</li>)}</ul>
-              <p><Link href="/conta/pedidos" className="text-link">Ver em Meus pedidos</Link></p>
+              <ul>
+                {payment.order.history.map(h => (
+                  <li key={h.id}>
+                    {ORDER_STATUS_LABEL[h.toStatus]} — {h.reason}
+                  </li>
+                ))}
+              </ul>
+              <p>
+                <Link href="/conta/pedidos" className="text-link">
+                  Ver em Meus pedidos
+                </Link>
+              </p>
             </div>
           )}
-          <Button type="button" disabled={busy} onClick={create}>
-            {busy ? "Consultando…" : payment || hasSavedOrder ? "Consultar e reconciliar pedido" : "Criar pedido Asaas Sandbox"}
-          </Button>
-          {canStartAnother && (
-            <Button type="button" variant="secondary" disabled={busy} onClick={() => resetAttempt("")}>
-              Iniciar outro pedido de teste
+
+          <div className="checkout-actions-row">
+            <Button
+              type="button"
+              variant={payment || hasSavedOrder ? "secondary" : "primary"}
+              className={!payment && !hasSavedOrder ? "checkout-submit" : ""}
+              disabled={busy}
+              onClick={create}
+            >
+              {busy
+                ? payment || hasSavedOrder
+                  ? "Atualizando…"
+                  : "Finalizando…"
+                : payment || hasSavedOrder
+                  ? "Atualizar status do pedido"
+                  : "Finalizar pedido"}
+              {!payment && !hasSavedOrder && <ArrowRight size={18} aria-hidden="true" />}
             </Button>
-          )}
-          {!payment && hasSavedOrder && (
-            <Button type="button" variant="secondary" disabled={busy} onClick={() => resetAttempt("")}>
-              Descartar tentativa salva
-            </Button>
-          )}
+            {canStartAnother && (
+              <Button type="button" variant="ghost" disabled={busy} onClick={() => resetAttempt("")}>
+                Fazer novo pedido
+              </Button>
+            )}
+            {!payment && hasSavedOrder && (
+              <Button type="button" variant="ghost" disabled={busy} onClick={() => resetAttempt("")}>
+                Descartar tentativa anterior
+              </Button>
+            )}
+          </div>
         </>
       )}
       {message && <p role="status">{message}</p>}

@@ -1,7 +1,7 @@
 "use client";
 import Image from "next/image";
 import Link from "next/link";
-import { Trash2 } from "lucide-react";
+import { Package, Trash2 } from "lucide-react";
 import type { CartItem as Item } from "@/types/cart";
 import { useCatalog } from "@/store/catalog-store";
 import { useCart } from "@/store/cart-store";
@@ -26,7 +26,13 @@ export function CartItem({ item }: { item: Item }) {
         onClick={() => close(null)}
         className="cart-thumb"
       >
-        <Image src={product.image} alt={product.name} fill sizes="96px" />
+        {product.image ? (
+          <Image src={product.image} alt={product.name} fill sizes="96px" />
+        ) : (
+          <div className="media-placeholder media-placeholder--thumb" aria-hidden="true">
+            <Package size={20} strokeWidth={1.4} />
+          </div>
+        )}
       </Link>
       <div className="cart-item-info">
         <Link href={`/produto/${product.slug}`} onClick={() => close(null)}>

@@ -30,7 +30,6 @@ export function MobileMenu() {
             <Link
               key={item.label}
               href={item.href}
-              prefetch={false}
               aria-current={active ? "page" : undefined}
               onClick={() => close(null)}
             >

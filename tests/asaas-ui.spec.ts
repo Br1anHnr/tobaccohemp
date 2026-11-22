@@ -125,26 +125,24 @@ test("Sandbox Pix checkout keeps demo default, displays dynamic QR/code, clears 
     return route.fulfill({ json: { data: receipt("pix", queries > 0 ? "paid" : "pending_payment") } });
   });
   await enterCheckout(page);
-  await expect(page.getByText("Ambiente de teste — nenhuma cobrança real será realizada.", { exact: false })).toBeVisible();
-  await page.getByLabel("Usar Asaas Sandbox (teste sintético)").check();
-  await page.getByRole("button", { name: "Criar pedido Asaas Sandbox" }).click();
-  await expect(page.getByRole("img", { name: "QR Code Pix dinâmico do pedido de teste Sandbox" })).toBeVisible();
+  await expect(page.getByText("Ambiente de homologação — cobranças reais estão desabilitadas neste Preview.", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Finalizar pedido" }).click();
+  await expect(page.getByRole("img", { name: "QR Code Pix do pedido" })).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Pix Copia e Cola" })).toHaveValue("000201-SYNTHETIC-PIX-UI");
-  await expect(page.getByText("1 × Case Compact Preto · Preto")).toBeVisible();
+  await expect(page.getByText("1 × Case Compact Preto · Preto").first()).toBeVisible();
 
   const cartAfterCreate = await page.evaluate(() => localStorage.getItem("th-cart-v1") ?? "");
   expect(JSON.parse(cartAfterCreate).state.items).toEqual([]);
 
-  expect((await new AxeBuilder({ page }).include('[aria-label="Asaas Sandbox"]').analyze()).violations).toEqual([]);
+  expect((await new AxeBuilder({ page }).include('[aria-label="Pagamento do pedido"]').analyze()).violations).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   await page.screenshot({ path: `.preview-validation/asaas-pix-${info.project.name}.png`, fullPage: true });
-  await page.getByRole("button", { name: "Consultar e reconciliar pedido" }).click();
+  await page.getByRole("button", { name: "Atualizar status do pedido" }).click();
   await expect(page.getByText("Pago · R$ 49,90")).toBeVisible();
   await page.getByRole("link", { name: "Ver em Meus pedidos" }).click();
   await expect(page).toHaveURL(/\/conta\/pedidos$/);
   await page.goBack();
   await expect(page).toHaveURL(/\/checkout$/);
-  await page.getByLabel("Usar Asaas Sandbox (teste sintético)").check();
   await expect(page.getByText("Pago · R$ 49,90")).toBeVisible();
   expect(posts).toBe(1);
   const storage = await page.evaluate(() => sessionStorage.getItem("th-asaas-sandbox-attempt"));
@@ -160,13 +158,12 @@ test("Sandbox checkout resets on expired/uncertain and clears stale 404 sessionS
     route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND", message: "Pedido não encontrado." } } }),
   );
   await enterCheckout(page);
-  await page.getByLabel("Usar Asaas Sandbox (teste sintético)").check();
-  await page.getByRole("button", { name: "Criar pedido Asaas Sandbox" }).click();
-  await expect(page.getByRole("button", { name: "Iniciar outro pedido de teste" })).toBeVisible();
-  await page.getByRole("button", { name: "Consultar e reconciliar pedido" }).click();
-  await expect(page.getByText("Tentativa anterior não pertence a esta conta", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Finalizar pedido" }).click();
+  await expect(page.getByRole("button", { name: "Fazer novo pedido" })).toBeVisible();
+  await page.getByRole("button", { name: "Atualizar status do pedido" }).click();
+  await expect(page.getByText("Pedido anterior não encontrado nesta conta.", { exact: false })).toBeVisible();
   expect(await page.evaluate(() => sessionStorage.getItem("th-asaas-sandbox-attempt"))).toBeNull();
-  await expect(page.getByRole("button", { name: "Criar pedido Asaas Sandbox" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Explorar a loja" })).toBeVisible();
 });
 
 test("Sandbox card opens only hosted sandbox, with no card fields or charge from callback", async ({ page }, info) => {
@@ -179,10 +176,9 @@ test("Sandbox card opens only hosted sandbox, with no card fields or charge from
     route.fulfill({ json: { data: receipt("card") } }),
   );
   await enterCheckout(page);
-  await page.getByLabel("Usar Asaas Sandbox (teste sintético)").check();
-  await page.getByLabel("Cartão hospedado Sandbox").check();
-  await page.getByRole("button", { name: "Criar pedido Asaas Sandbox" }).click();
-  await expect(page.getByRole("link", { name: "Abrir cartão no Asaas Sandbox" })).toHaveAttribute(
+  await page.locator("#asaas-method-card").check();
+  await page.getByRole("button", { name: "Finalizar pedido" }).click();
+  await expect(page.getByRole("link", { name: "Pagar com cartão" })).toHaveAttribute(
     "href",
     /^https:\/\/sandbox\.asaas\.com\/checkoutSession\/show\?id=/,
   );
@@ -190,7 +186,7 @@ test("Sandbox card opens only hosted sandbox, with no card fields or charge from
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   await page.screenshot({ path: `.preview-validation/asaas-card-${info.project.name}.png`, fullPage: true });
   await page.goto("/checkout?asaasOrder=sandbox-ui-order");
-  await expect(page.getByRole("link", { name: "Entre com sua conta de teste" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Entrar na conta" })).toBeVisible();
   expect(posts).toBe(1);
 });
 

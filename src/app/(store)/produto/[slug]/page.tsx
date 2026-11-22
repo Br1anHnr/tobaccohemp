@@ -7,7 +7,7 @@ import { ProductDetails } from "@/components/commerce/ProductDetails";
 import { ProductGrid } from "@/components/commerce/ProductGrid";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 export async function generateMetadata({
   params,

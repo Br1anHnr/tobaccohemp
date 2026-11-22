@@ -311,7 +311,7 @@ test("checkout validates, confirms demo order and clears persisted cart", async 
   ).toBeVisible();
 });
 
-test("checkout supports decoupled channel and payment method without collecting card data or storing PII", async ({
+test("checkout supports payment method selection without collecting card data or storing PII", async ({
   page,
 }) => {
   await enter(page, "/produto/case-compact-preto");
@@ -324,8 +324,8 @@ test("checkout supports decoupled channel and payment method without collecting 
     .click();
 
   await expect(page.locator("input[name='cardNumber']")).toHaveCount(0);
-  await page.getByLabel(/Continuar no WhatsApp/).check();
-  await page.getByLabel(/Pix \(simulação\)/).check();
+  await expect(page.locator("#channel-whatsapp")).toHaveCount(0);
+  await page.locator("#method-pix").check();
 
   const values: Record<string, string> = {
     name: "Cliente Simulação",
@@ -347,8 +347,7 @@ test("checkout supports decoupled channel and payment method without collecting 
     .click();
 
   await expect(page).toHaveURL(/pedido-confirmado/);
-  await expect(page.locator(".confirmation")).toContainText("Link via WhatsApp");
-  await expect(page.locator(".confirmation")).toContainText("Provedor: demo (desacoplado)");
+  await expect(page.locator(".confirmation")).not.toContainText("(desacoplado)");
   await expect(page.locator(".demo-pix-code")).toContainText("SEM-VALOR-FINANCEIRO");
 
   await page.locator(".confirmation-details summary").click();

@@ -24,13 +24,26 @@ export function CategoriesTable() {
   const [name, setName] = useState("");
   const [slug, setSlug] = useState("");
   const [description, setDescription] = useState("");
+  const [image, setImage] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const rows = data ?? [];
 
-  const openCreate = () => { setEditing(null); setName(""); setSlug(""); setDescription(""); setFormOpen(true); };
+  const openCreate = () => {
+    setEditing(null);
+    setName("");
+    setSlug("");
+    setDescription("");
+    setImage("");
+    setFormOpen(true);
+  };
   const openEdit = (category: AdminCategory) => {
-    setEditing(category); setName(category.name); setSlug(category.slug); setDescription(category.description); setFormOpen(true);
+    setEditing(category);
+    setName(category.name);
+    setSlug(category.slug);
+    setDescription(category.description);
+    setImage(category.image ?? "");
+    setFormOpen(true);
   };
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -38,7 +51,12 @@ export function CategoriesTable() {
     if (pending || !name.trim()) return;
     setPending(true); setError("");
     try {
-      const payload = { name: name.trim(), slug: slug.trim() || slugify(name.trim()), description: description.trim(), image: "" };
+      const payload = {
+        name: name.trim(),
+        slug: slug.trim() || slugify(name.trim()),
+        description: description.trim(),
+        image: image.trim(),
+      };
       if (editing) await updateCategory(editing.slug, payload);
       else await createCategory(payload);
       retry();
@@ -97,8 +115,18 @@ export function CategoriesTable() {
                 {rows.map((category) => (
                   <tr key={category.slug}>
                     <td>
-                      <span className="cell-primary">{category.name}</span>
-                      <span className="cell-sub">{category.description || "Sem descrição"}</span>
+                      <div className="admin-product-cell">
+                        {category.image ? (
+                          /* eslint-disable-next-line @next/next/no-img-element */
+                          <img src={category.image} alt="" className="admin-thumb" />
+                        ) : (
+                          <span className="admin-thumb admin-thumb--empty" aria-hidden="true">Auto</span>
+                        )}
+                        <div>
+                          <span className="cell-primary">{category.name}</span>
+                          <span className="cell-sub">{category.description || "Sem descrição"}</span>
+                        </div>
+                      </div>
                     </td>
                     <td>{category.slug}</td>
                     <td className="num">{category.productCount === 0 ? "Sem produtos" : category.productCount}</td>
@@ -135,7 +163,7 @@ export function CategoriesTable() {
         open={formOpen}
         onClose={() => setFormOpen(false)}
         title={editing ? "Editar categoria" : "Cadastrar categoria"}
-        description="Categorias vazias não aparecem na vitrine e podem ser removidas."
+        description="Categorias vazias ficam ocultas da vitrine e podem ser removidas."
       >
         <form onSubmit={submit} className="admin-form">
           <FormField
@@ -151,6 +179,14 @@ export function CategoriesTable() {
             value={slug}
             onChange={(event) => setSlug(event.target.value)}
             hint="Opcional — gerado automaticamente a partir do nome."
+          />
+          <FormField
+            id="category-image"
+            label="Imagem de capa (URL)"
+            value={image}
+            onChange={(event) => setImage(event.target.value)}
+            placeholder="https://... (opcional)"
+            hint="Opcional. Se vazio, usa a primeira foto de um produto ativo da categoria."
           />
           <div className="form-field">
             <label htmlFor="category-description">Descrição</label>

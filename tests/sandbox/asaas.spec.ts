@@ -7,6 +7,7 @@ import { signUpCustomer, customerSessionCookie } from "../../src/modules/auth";
 import { createOrder, getOrderDetail, expireOverdueOrders, transitionOrderStatus, listOrderHistory, listCustomerOrders } from "../../src/modules/orders";
 import { createSandboxPayment, processAsaasEvent, sandboxPaymentView, sandboxDashboard, adminCancelSandboxAttempt } from "../../src/modules/orders/infrastructure/asaas-sandbox";
 import { AsaasClient, ASAAS_SANDBOX_BASE, sandboxEnabled } from "../../src/modules/orders/infrastructure/asaas-client";
+import { customerAuthEnabled } from "../../src/shared/server/preview";
 import { POST as webhook } from "../../src/app/api/webhooks/asaas/route";
 import { POST as checkout } from "../../src/app/api/checkout/asaas/route";
 import { GET as lookup } from "../../src/app/api/checkout/asaas/[id]/route";
@@ -247,14 +248,16 @@ test("demo orders and expiry sweep remain isolated, manual Asaas transitions for
   const dashboard = await sandboxDashboard(); expect(dashboard.environment).toBe("sandbox"); expect(dashboard.attempts.some(r => r.id===demo.id)).toBe(false);
 });
 
-test("only explicit Sandbox preview branch is permitted and production stays disabled", () => {
+test("only explicit Sandbox preview branch is permitted and production enables auth without sandbox", () => {
   const saved = {...process.env};
   try {
     process.env.VERCEL="1";process.env.VERCEL_ENV="preview";process.env.PREVIEW_BACKEND_ENABLED="1";process.env.APP_ORIGIN="https://sandbox.example.test";
     process.env.VERCEL_GIT_COMMIT_REF="main";expect(sandboxEnabled()).toBe(false);
     process.env.VERCEL_GIT_COMMIT_REF="homologacao/funcional-e2e";expect(sandboxEnabled()).toBe(false);
     process.env.VERCEL_GIT_COMMIT_REF="sandbox/asaas-preview";expect(sandboxEnabled()).toBe(true);
-    process.env.VERCEL_ENV="production";expect(sandboxEnabled()).toBe(false);
+    process.env.VERCEL_ENV="production";process.env.APP_BACKEND_ENABLED="1";process.env.APP_ORIGIN="https://tobaccohemp.vercel.app";
+    expect(sandboxEnabled()).toBe(false);
+    expect(customerAuthEnabled()).toBe(true);
   } finally { process.env = saved; }
 });
 

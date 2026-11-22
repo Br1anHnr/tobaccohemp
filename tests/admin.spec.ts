@@ -290,11 +290,15 @@ test("categorias page lists categories and product edit form opens pre-filled", 
 
   await page.goto("/admin/produtos");
   await expect(page.locator(".admin-table tbody tr").first()).toBeVisible();
+  await expect(page.getByLabel("Mídia")).toBeVisible();
   const row = page.locator(".admin-table tbody tr").filter({ hasText: "Kit Urban" });
   await row.getByRole("button", { name: "Editar Kit Urban" }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog.getByLabel("Nome", { exact: true })).toHaveValue("Kit Urban");
   await expect(dialog.getByLabel("Preço (R$)", { exact: true })).toHaveValue(/89/);
+  await expect(dialog.locator("#product-variants")).toBeVisible();
+  await expect(dialog.locator("#product-tags")).toBeVisible();
+  await expect(dialog.locator("#product-reorder")).toBeVisible();
 });
 
 test("admin layout is responsive and its sidebar opens on mobile", async ({

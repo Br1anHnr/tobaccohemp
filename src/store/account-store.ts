@@ -15,6 +15,8 @@ interface AccountState {
   /** True only while the visitor explores the demonstrative customer area. */
   demo: boolean;
   hydrated: boolean;
+  sessionPending: boolean;
+  sessionChecked: boolean;
   /** Signed-in customer, or null for guests and the demo area. */
   customer: CustomerProfile | null;
   /** Profile shown in the customer area (signed-in account or demo). */
@@ -30,6 +32,8 @@ interface AccountState {
   updateAddress: (id: string, input: CustomerAddressInput) => Promise<AuthResult>;
   deleteAddress: (id: string) => Promise<AuthResult>;
 }
+
+let inflightSession: Promise<void> | null = null;
 
 function applyAddresses(
   customer: CustomerProfile,
@@ -49,27 +53,60 @@ export const useAccount = create<AccountState>()(
     (set, get) => ({
       demo: false,
       hydrated: false,
+      sessionPending: false,
+      sessionChecked: false,
       customer: null,
       profile: demoProfile,
-      startDemo: () => set({ demo: true, customer: null, profile: demoProfile }),
-      endDemo: () => set({ demo: false, customer: null, profile: demoProfile }),
+      startDemo: () => set({ demo: true, customer: null, profile: demoProfile, sessionPending: false }),
+      endDemo: () => set({ demo: false, customer: null, profile: demoProfile, sessionPending: false }),
       loadSession: async () => {
-        const account = await fetchCustomerSession();
-        if (account) set({ customer: account, profile: account, demo: false });
+        if (inflightSession) return inflightSession;
+        set({ sessionPending: true });
+        inflightSession = fetchCustomerSession()
+          .then((account) => {
+            if (account) {
+              set({ customer: account, profile: account, demo: false, sessionChecked: true, sessionPending: false });
+            } else {
+              set({ sessionChecked: true, sessionPending: false });
+            }
+          })
+          .catch(() => {
+            set({ sessionChecked: true, sessionPending: false });
+          })
+          .finally(() => {
+            inflightSession = null;
+          });
+        return inflightSession;
       },
       signIn: async (input) => {
         const result = await authClient.signIn(input);
-        if (result.ok && result.account) set({ customer: result.account, profile: result.account, demo: false });
+        if (result.ok && result.account) {
+          set({
+            customer: result.account,
+            profile: result.account,
+            demo: false,
+            sessionChecked: true,
+            sessionPending: false,
+          });
+        }
         return result;
       },
       signUp: async (input) => {
         const result = await authClient.signUp(input);
-        if (result.ok && result.account) set({ customer: result.account, profile: result.account, demo: false });
+        if (result.ok && result.account) {
+          set({
+            customer: result.account,
+            profile: result.account,
+            demo: false,
+            sessionChecked: true,
+            sessionPending: false,
+          });
+        }
         return result;
       },
       signOut: async () => {
         await authClient.signOut();
-        set({ customer: null, profile: demoProfile, demo: false });
+        set({ customer: null, profile: demoProfile, demo: false, sessionChecked: true, sessionPending: false });
       },
       saveProfile: async (profile) => {
         if (get().customer) {

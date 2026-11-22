@@ -18,12 +18,13 @@ const links = [
 export function AccountShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { demo, hydrated, customer, startDemo, endDemo, signOut, loadSession, profile } = useAccount();
-  const [resolving, setResolving] = useState(true);
+  const { demo, hydrated, customer, sessionChecked, sessionPending, startDemo, endDemo, signOut, loadSession, profile } = useAccount();
+  const [resolving, setResolving] = useState(!customer && !demo && !sessionChecked);
 
   // Resolve the session cookie when not already hydrated from server or client state.
   useEffect(() => {
     if (!hydrated || customer || demo) return;
+    if (sessionChecked && !sessionPending) return;
     let cancelled = false;
     loadSession().finally(() => {
       if (!cancelled) setResolving(false);
@@ -31,9 +32,9 @@ export function AccountShell({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [hydrated, customer, demo, loadSession]);
+  }, [hydrated, customer, demo, sessionChecked, sessionPending, loadSession]);
 
-  if (!hydrated || (!customer && !demo && resolving))
+  if (!hydrated || (!customer && !demo && (sessionPending || (!sessionChecked && resolving))))
     return <PageSkeleton label="Carregando sua conta…" />;
 
   if (!customer && !demo)

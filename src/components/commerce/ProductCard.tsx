@@ -1,7 +1,7 @@
 "use client";
 import Image from "next/image";
 import Link from "next/link";
-import { Heart } from "lucide-react";
+import { Heart, Package } from "lucide-react";
 import type { Product } from "@/types/product";
 import { useCart } from "@/store/cart-store";
 import { Price } from "./Price";
@@ -15,15 +15,21 @@ export function ProductCard({ product }: { product: Product }) {
       <div className="product-media">
         <Link
           href={`/produto/${product.slug}`}
-          prefetch={false}
           aria-label={`Ver ${product.name}`}
         >
-          <Image
-            src={product.image}
-            alt={product.name}
-            fill
-            sizes="(max-width: 767px) 46vw, (max-width: 1100px) 30vw, 23vw"
-          />
+          {product.image ? (
+            <Image
+              src={product.image}
+              alt={product.name}
+              fill
+              sizes="(max-width: 767px) 46vw, (max-width: 1100px) 30vw, 23vw"
+            />
+          ) : (
+            <div className="media-placeholder" aria-hidden="true">
+              <Package size={28} strokeWidth={1.4} />
+              <span>Sem foto</span>
+            </div>
+          )}
         </Link>
         {product.isNew && <span className="badge">Novo</span>}
         <button

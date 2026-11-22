@@ -22,9 +22,11 @@ const items = [
 export function AdminSidebar({
   open,
   onClose,
+  sandboxEnabled = false,
 }: {
   open: boolean;
   onClose: () => void;
+  sandboxEnabled?: boolean;
 }) {
   const pathname = usePathname();
 
@@ -54,7 +56,9 @@ export function AdminSidebar({
         ))}
 
         <p className="admin-nav__group">Comercial</p>
-        <Link href="/admin/asaas" className="admin-nav__link" onClick={onClose} aria-current={pathname === "/admin/asaas" ? "page" : undefined}>Asaas Sandbox</Link>
+        {sandboxEnabled && (
+          <Link href="/admin/asaas" className="admin-nav__link" onClick={onClose} aria-current={pathname === "/admin/asaas" ? "page" : undefined}>Asaas Sandbox</Link>
+        )}
         <Link
           href="/admin/pedidos"
           className="admin-nav__link"

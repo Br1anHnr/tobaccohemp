@@ -24,7 +24,7 @@ export function AdminLogin() {
       await loginAdmin({ email, password });
       setPassword("");
       const next = new URLSearchParams(window.location.search).get("next") ?? "/admin";
-      router.replace(/^\/admin(?:\/(?:clientes|produtos))?$/.test(next) ? next : "/admin");
+      router.replace(/^\/admin(?:\/(?:clientes|produtos|categorias|pedidos|asaas))?$/.test(next) ? next : "/admin");
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Não foi possível entrar.");
     } finally { setPending(false); }
@@ -33,7 +33,7 @@ export function AdminLogin() {
     <section className="table-card admin-login-card" aria-labelledby="admin-login-title">
       <Logo />
       <h1 id="admin-login-title">Acesso administrativo</h1>
-      <p>Ambiente local com dados sintéticos.</p>
+      <p>Acesso ao painel administrativo da loja.</p>
       <form method="post" onSubmit={submit}>
         <label htmlFor="admin-email">E-mail</label>
         <input id="admin-email" name="email" type="email" autoComplete="username" required value={email}

@@ -16,6 +16,34 @@ interface FormImage {
   file?: File;
 }
 
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const ALLOWED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+function parseCommaList(raw: string, maxItems: number, maxLen: number): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const part of raw.split(",")) {
+    const item = part.trim().slice(0, maxLen);
+    if (!item) continue;
+    const key = item.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+    if (out.length >= maxItems) break;
+  }
+  return out;
+}
+
+function validateImageFile(file: File): string | null {
+  if (!ALLOWED_IMAGE_TYPES.has(file.type)) {
+    return `Formato inválido (${file.name}). Envie imagens JPG, PNG ou WebP.`;
+  }
+  if (file.size > MAX_IMAGE_BYTES) {
+    return `A imagem ${file.name} excede o limite de 5 MB.`;
+  }
+  return null;
+}
+
 export function ProductForm({
   open,
   onClose,
@@ -29,7 +57,8 @@ export function ProductForm({
   product?: AdminProduct | null;
   categories: AdminCategory[];
 }) {
-  const editing = Boolean(product);
+  const [persistedId, setPersistedId] = useState<string | null>(product?.id ?? null);
+  const editing = Boolean(persistedId);
   const [name, setName] = useState(product?.name ?? "");
   const [sku, setSku] = useState(product?.sku ?? "");
   const [price, setPrice] = useState(product ? String(product.price).replace(".", ",") : "");
@@ -38,6 +67,11 @@ export function ProductForm({
   const [slug, setSlug] = useState(product?.slug ?? "");
   const [categorySlug, setCategorySlug] = useState(product?.categorySlug ?? "");
   const [stock, setStock] = useState(product ? String(product.stock) : "");
+  const [reorderPoint, setReorderPoint] = useState(
+    product ? String(product.reorderPoint ?? 3) : "3",
+  );
+  const [variantsText, setVariantsText] = useState((product?.variants ?? []).join(", "));
+  const [tagsText, setTagsText] = useState((product?.tags ?? []).join(", "));
   const [active, setActive] = useState(product?.active ?? true);
   const [isFeatured, setIsFeatured] = useState(product?.isFeatured ?? false);
   const [isNew, setIsNew] = useState(product?.isNew ?? false);
@@ -45,16 +79,26 @@ export function ProductForm({
     (product?.images ?? []).map((image) => ({ id: image.id, url: image.url })),
   );
   const [pending, setPending] = useState(false);
+  const [progressText, setProgressText] = useState("");
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const fileInput = useRef<HTMLInputElement>(null);
 
   const addFiles = (files: FileList | null) => {
     if (!files?.length) return;
-    setImages((current) => [
-      ...current,
-      ...Array.from(files).map((file) => ({ url: URL.createObjectURL(file), file })),
-    ]);
+    const accepted: FormImage[] = [];
+    for (const file of Array.from(files)) {
+      const issue = validateImageFile(file);
+      if (issue) {
+        setError(issue);
+        continue;
+      }
+      accepted.push({ url: URL.createObjectURL(file), file });
+    }
+    if (accepted.length) {
+      setError("");
+      setImages((current) => [...current, ...accepted]);
+    }
   };
 
   const removeImage = (index: number) => {
@@ -66,6 +110,12 @@ export function ProductForm({
   };
 
   const replaceImage = (index: number, file: File) => {
+    const issue = validateImageFile(file);
+    if (issue) {
+      setError(issue);
+      return;
+    }
+    setError("");
     setImages((current) =>
       current.map((image, i) => {
         if (i !== index) return image;
@@ -100,10 +150,15 @@ export function ProductForm({
     if (stock.trim() !== "" && (!Number.isSafeInteger(parsedStock) || parsedStock < 0)) {
       errors.stock = "Informe um estoque válido.";
     }
+    const parsedReorder = reorderPoint.trim() === "" ? 0 : Number(reorderPoint);
+    if (reorderPoint.trim() !== "" && (!Number.isSafeInteger(parsedReorder) || parsedReorder < 0)) {
+      errors.reorderPoint = "Informe um estoque mínimo válido.";
+    }
     setFieldErrors(errors);
     if (Object.keys(errors).length) return;
 
     setPending(true);
+    setProgressText("Salvando produto…");
     setError("");
     try {
       const input = {
@@ -117,34 +172,49 @@ export function ProductForm({
         categorySlug: categorySlug || null,
         isNew,
         isFeatured,
+        variants: parseCommaList(variantsText, 12, 32),
+        tags: parseCommaList(tagsText, 20, 32),
       };
 
-      let productId: string;
-      if (editing && product) {
-        await updateProduct(product.id, input);
-        productId = product.id;
+      let productId = persistedId;
+      if (productId) {
+        await updateProduct(productId, input);
       } else {
         const created = await createProduct(input);
         productId = created.id;
+        setPersistedId(created.id);
       }
-      await updateStock(productId, parsedStock, product?.reorderPoint ?? 0);
+      await updateStock(productId, parsedStock, parsedReorder);
 
-      // Resolve images: upload new files, replace edited files, then reorder.
+      // Resolve images: delete removed, upload/replace R2 files incrementally, then reorder.
       const originalIds = (product?.images ?? []).map((image) => image.id);
       const kept = new Set<string>();
       for (const image of images) {
         if (image.id) kept.add(image.id);
       }
       const toDelete = originalIds.filter((id) => !kept.has(id));
+      if (toDelete.length || images.some((i) => i.file)) {
+        setProgressText("Enviando fotos para o R2…");
+      }
       for (const id of toDelete) await deleteProductImage(productId, id);
 
+      const nextImages = [...images];
       const orderedIds: string[] = [];
-      for (const image of images) {
+      for (let i = 0; i < nextImages.length; i++) {
+        const image = nextImages[i];
         if (image.id) {
-          if (image.file) await replaceProductImage(productId, image.id, image.file);
+          if (image.file) {
+            const replaced = await replaceProductImage(productId, image.id, image.file);
+            URL.revokeObjectURL(image.url);
+            nextImages[i] = { id: replaced.id, url: replaced.url };
+            setImages([...nextImages]);
+          }
           orderedIds.push(image.id);
         } else if (image.file) {
           const uploaded = await uploadProductImage(productId, image.file, name.trim());
+          URL.revokeObjectURL(image.url);
+          nextImages[i] = { id: uploaded.id, url: uploaded.url };
+          setImages([...nextImages]);
           orderedIds.push(uploaded.id);
         }
       }
@@ -165,10 +235,9 @@ export function ProductForm({
       );
     } finally {
       setPending(false);
+      setProgressText("");
     }
   }
-
-  const mainImage = images[0]?.url;
 
   return (
     <Modal
@@ -178,7 +247,7 @@ export function ProductForm({
       description={
         editing
           ? "Atualize os dados do produto. As alterações refletem na vitrine."
-          : "Crie um produto no catálogo. O estoque inicial pode ser definido aqui."
+          : "Crie um produto real no catálogo e envie as fotos para o Cloudflare R2."
       }
     >
       <form onSubmit={submit} className="admin-form">
@@ -237,11 +306,45 @@ export function ProductForm({
             error={fieldErrors.stock}
           />
           <FormField
+            id="product-reorder"
+            label="Estoque mínimo"
+            type="number"
+            min={0}
+            step={1}
+            value={reorderPoint}
+            onChange={(event) => setReorderPoint(event.target.value)}
+            error={fieldErrors.reorderPoint}
+            hint="Alerta de reposição no painel."
+          />
+          <FormField
             id="product-brand"
             label="Coleção"
             value={brand}
             onChange={(event) => setBrand(event.target.value)}
             hint="Ex.: Seleção da loja"
+          />
+          <FormField
+            id="product-slug"
+            label="Slug (URL)"
+            value={slug}
+            onChange={(event) => setSlug(event.target.value)}
+            hint="Opcional — gerado a partir do nome."
+          />
+          <FormField
+            id="product-variants"
+            label="Variações"
+            value={variantsText}
+            onChange={(event) => setVariantsText(event.target.value)}
+            placeholder="Ex.: Preto, Grafite"
+            hint="Separe por vírgula (opcional)."
+          />
+          <FormField
+            id="product-tags"
+            label="Tags de busca"
+            value={tagsText}
+            onChange={(event) => setTagsText(event.target.value)}
+            placeholder="Ex.: estojo, viagem, metal"
+            hint="Separe por vírgula (opcional)."
           />
         </div>
         <div className="form-field">
@@ -255,13 +358,6 @@ export function ProductForm({
             placeholder="Descreva o produto para a vitrine."
           />
         </div>
-        <FormField
-          id="product-slug"
-          label="Slug (URL)"
-          value={slug}
-          onChange={(event) => setSlug(event.target.value)}
-          hint="Opcional — gerado automaticamente a partir do nome."
-        />
         <div className="form-grid-2">
           <label className="form-field checkbox-label">
             <input
@@ -293,7 +389,7 @@ export function ProductForm({
         </div>
 
         <fieldset className="image-manager">
-          <legend>Imagens</legend>
+          <legend>Imagens (Cloudflare R2)</legend>
           <div className="image-manager__grid">
             {images.map((image, index) => (
               <div
@@ -356,12 +452,9 @@ export function ProductForm({
               Adicionar
             </button>
           </div>
-          {mainImage && (
-            <p className="field-hint">
-              A primeira imagem é a principal. Use as setas para reordenar e o
-              ícone de upload para substituir.
-            </p>
-          )}
+          <p className="field-hint">
+            Fotos em JPG, PNG ou WebP (até 5 MB), salvas no Cloudflare R2. A primeira foto é a capa na vitrine.
+          </p>
           <input
             ref={fileInput}
             type="file"
@@ -390,7 +483,7 @@ export function ProductForm({
             className="button button-primary"
             disabled={pending}
           >
-            {pending ? "Salvando…" : editing ? "Salvar alterações" : "Cadastrar"}
+            {pending ? (progressText || "Salvando…") : editing ? "Salvar alterações" : "Cadastrar"}
           </button>
         </div>
       </form>

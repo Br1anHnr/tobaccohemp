@@ -17,7 +17,13 @@ const sectionFor = (pathname: string) => {
   return "Painel administrativo";
 };
 
-export function AdminShell({ children }: { children: ReactNode }) {
+export function AdminShell({
+  children,
+  sandboxEnabled = false,
+}: {
+  children: ReactNode;
+  sandboxEnabled?: boolean;
+}) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -39,7 +45,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
         Pular para o conteúdo
       </a>
       <div className="admin-shell">
-        <AdminSidebar open={menuOpen} onClose={() => setMenuOpen(false)} />
+        <AdminSidebar open={menuOpen} onClose={() => setMenuOpen(false)} sandboxEnabled={sandboxEnabled} />
         {menuOpen && (
           <button
             type="button"

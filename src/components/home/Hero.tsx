@@ -32,7 +32,6 @@ export function Hero() {
           <div>
             <Link
               href="/loja?novidades=1"
-              prefetch={false}
               className="button button-primary"
             >
               Ver novidades <ArrowRight size={18} />

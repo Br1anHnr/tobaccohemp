@@ -63,14 +63,18 @@ export function Providers({
   products,
   categories,
   initialCustomer = null,
+  authAvailable = false,
 }: {
   children: ReactNode;
   products: Product[];
   categories: Category[];
   initialCustomer?: CustomerProfile | null;
+  authAvailable?: boolean;
 }) {
   const storageError = useCart((s) => s.storageError);
   const appliedCustomerKey = useRef<string | null>(null);
+  const sessionInitialized = useRef(false);
+  const cartBooted = useRef(false);
   const initialCustomerKey = initialCustomer
     ? JSON.stringify([
         initialCustomer.name,
@@ -85,26 +89,42 @@ export function Providers({
     // Seed the runtime catalog before rehydrating the cart, whose `merge`
     // validates persisted items against the product list.
     useCatalog.getState().setCatalog(products, categories);
-    Promise.resolve(useCart.persist.rehydrate()).finally(() =>
-      useCart.setState({ hydrated: true }),
-    );
+    if (!cartBooted.current) {
+      cartBooted.current = true;
+      Promise.resolve(useCart.persist.rehydrate()).finally(() =>
+        useCart.setState({ hydrated: true }),
+      );
+    }
+    if (sessionInitialized.current && !initialCustomer) {
+      return;
+    }
     Promise.resolve(useAccount.persist.rehydrate()).finally(() => {
       if (initialCustomer && appliedCustomerKey.current !== initialCustomerKey) {
         appliedCustomerKey.current = initialCustomerKey;
+        sessionInitialized.current = true;
         useAccount.setState({
           customer: initialCustomer,
           profile: initialCustomer,
           demo: false,
           hydrated: true,
+          sessionChecked: true,
+          sessionPending: false,
         });
         return;
       }
-      if (!initialCustomer) {
-        appliedCustomerKey.current = null;
+      if (sessionInitialized.current) {
+        return;
+      }
+      sessionInitialized.current = true;
+      const state = useAccount.getState();
+      if (authAvailable && !state.customer && !state.demo && !state.sessionChecked) {
+        useAccount.setState({ hydrated: true, sessionPending: true });
+        void state.loadSession();
+        return;
       }
       useAccount.setState({ hydrated: true });
     });
-  }, [products, categories, initialCustomer, initialCustomerKey]);
+  }, [products, categories, initialCustomer, initialCustomerKey, authAvailable]);
   return (
     <MotionConfig reducedMotion="user">
       {children}

@@ -3372,3 +3372,49 @@ main:focus {
     animation: none;
   }
 }
+.media-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.media-placeholder--category {
+  background: radial-gradient(circle at 30% 25%, #232018 0%, #10100f 75%);
+}
+.media-placeholder--pdp {
+  gap: 10px;
+  font-size: 12px;
+}
+.media-placeholder--thumb {
+  gap: 0;
+}
+.media-placeholder--search {
+  position: static;
+  width: 64px;
+  height: 64px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.checkout-actions-row,
+.checkout-guest-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+  align-items: center;
+}
+.asaas-checkout-card {
+  display: grid;
+  gap: 14px;
+}
+.asaas-checkout-card .checkout-choice-grid {
+  margin-top: 4px;
+}

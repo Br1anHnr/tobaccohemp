@@ -10,6 +10,19 @@ import { StatusBadge } from "./Badge";
 import { ProductForm } from "./ProductForm";
 import type { AdminProduct } from "@/types/admin";
 
+function mediaKind(product: AdminProduct): "r2" | "ilustrativa" | "sem_foto" {
+  if (!product.images?.length) return "sem_foto";
+  const url = product.images[0]?.url ?? "";
+  return url.startsWith("https://") ? "r2" : "ilustrativa";
+}
+
+function mediaSummary(product: AdminProduct): string {
+  const count = product.images?.length ?? 0;
+  const kind = mediaKind(product);
+  if (kind === "sem_foto") return "Sem foto";
+  return `${kind === "r2" ? "R2" : "Ilustrativa"} · ${count} ${count === 1 ? "foto" : "fotos"}`;
+}
+
 const filtersFor = (rows: AdminProduct[]): Filter<AdminProduct>[] => [
   {
     key: "category",
@@ -29,6 +42,17 @@ const filtersFor = (rows: AdminProduct[]): Filter<AdminProduct>[] => [
       { value: "arquivado", label: "Arquivados" },
     ],
     match: (row, value) => (value === "arquivado" ? Boolean(row.archived) : !row.archived && row.status === value),
+  },
+  {
+    key: "media",
+    label: "Mídia",
+    allLabel: "Todas as mídias",
+    options: [
+      { value: "r2", label: "Fotos R2" },
+      { value: "ilustrativa", label: "Ilustrativas (demo)" },
+      { value: "sem_foto", label: "Sem foto" },
+    ],
+    match: (row, value) => mediaKind(row) === value,
   },
 ];
 
@@ -71,13 +95,21 @@ export function ProductsTable() {
       header: "Produto",
       searchText: (p) => `${p.name} ${p.category} ${p.sku ?? ""}`,
       render: (p) => (
-        <>
-          <span className="cell-primary">{p.name}</span>
-          <span className="cell-sub">
-            {p.category}
-            {p.archived ? " · Arquivado" : ""}
-          </span>
-        </>
+        <div className="admin-product-cell">
+          {p.images?.[0]?.url ? (
+            /* eslint-disable-next-line @next/next/no-img-element */
+            <img src={p.images[0].url} alt="" className="admin-thumb" />
+          ) : (
+            <span className="admin-thumb admin-thumb--empty" aria-hidden="true">Sem foto</span>
+          )}
+          <div>
+            <span className="cell-primary">{p.name}</span>
+            <span className="cell-sub">
+              {p.category} · {mediaSummary(p)}
+              {p.archived ? " · Arquivado" : ""}
+            </span>
+          </div>
+        </div>
       ),
     },
     {
@@ -169,7 +201,7 @@ export function ProductsTable() {
       rows={rows}
       filters={filters}
       searchPlaceholder="Buscar por produto, SKU ou categoria"
-      caption="Lista de produtos e estoque demonstrativos"
+      caption="Lista de produtos, mídia e estoque"
       status={status}
       onRetry={retry}
       onSimulateError={fail}
@@ -178,6 +210,7 @@ export function ProductsTable() {
     />
     {formOpen && (
       <ProductForm
+        key={editing?.id ?? "new"}
         open={formOpen}
         onClose={() => setFormOpen(false)}
         onSaved={retry}

@@ -14,8 +14,8 @@ export default function AdminProductsPage() {
           Produtos &amp; estoque<span className="accent-dot">.</span>
         </h1>
         <p>
-          Acompanhe preços e estoque do catálogo e ajuste as quantidades. Os
-          números são demonstrativos e não refletem o estoque real.
+          Cadastre e edite produtos reais com fotos no Cloudflare R2, variações,
+          tags e estoque.
         </p>
       </div>
       <ProductsTable />
