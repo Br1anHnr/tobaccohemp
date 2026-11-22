@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { addImage, listImages, reorderImages } from "@/modules/catalog";
+import { revalidateStorefrontCatalog } from "@/lib/storefront";
 import { adminRoute, jsonInput } from "@/shared/server/admin-http";
 import { adminMutation } from "@/shared/server/admin-mutation";
 import { AdminError } from "@/shared/server/validation";
@@ -28,7 +29,9 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   return adminRoute(async () => {
     const { id } = await context.params;
     const { file, alt } = await imageFile(request);
-    return adminMutation(db => addImage(id, file, alt, db));
+    const image = await adminMutation(db => addImage(id, file, alt, db));
+    revalidateStorefrontCatalog();
+    return image;
   }, { status: 201 })(request);
 }
 
@@ -36,6 +39,8 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   return adminRoute(async request => {
     const { id } = await context.params;
     const input = await jsonInput(request);
-    return adminMutation(db => reorderImages(id, input, db));
+    const result = await adminMutation(db => reorderImages(id, input, db));
+    revalidateStorefrontCatalog();
+    return result;
   })(request);
 }

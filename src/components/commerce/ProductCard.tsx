@@ -15,6 +15,7 @@ export function ProductCard({ product }: { product: Product }) {
       <div className="product-media">
         <Link
           href={`/produto/${product.slug}`}
+          prefetch={false}
           aria-label={`Ver ${product.name}`}
         >
           <Image
@@ -36,7 +37,7 @@ export function ProductCard({ product }: { product: Product }) {
       </div>
       <div className="product-info">
         <p>{product.category}</p>
-        <Link href={`/produto/${product.slug}`}>
+        <Link href={`/produto/${product.slug}`} prefetch={false}>
           <h3>{product.name}</h3>
         </Link>
         <div className="product-bottom">

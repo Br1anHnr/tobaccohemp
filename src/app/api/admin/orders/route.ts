@@ -1,4 +1,5 @@
 import { createOrder, listOrders } from "@/modules/orders";
+import { revalidateStorefrontCatalog } from "@/lib/storefront";
 import { adminRoute, jsonInput } from "@/shared/server/admin-http";
 import { adminMutation } from "@/shared/server/admin-mutation";
 import { AdminError } from "@/shared/server/validation";
@@ -28,9 +29,11 @@ export const POST = adminRoute(
       }
       payload = { ...record, idempotencyKey: record.idempotencyKey || headerKey };
     }
-    return adminMutation((db) =>
+    const order = await adminMutation((db) =>
       createOrder(payload, { actorType: "admin", actorId: user?.id }, db),
     );
+    revalidateStorefrontCatalog();
+    return order;
   },
   { status: 201 },
 );

@@ -30,6 +30,7 @@ export function MobileMenu() {
             <Link
               key={item.label}
               href={item.href}
+              prefetch={false}
               aria-current={active ? "page" : undefined}
               onClick={() => close(null)}
             >
@@ -40,11 +41,12 @@ export function MobileMenu() {
         })}
       </nav>
       <div className="mobile-menu-links">
-        <Link href="/conta" className="menu-account" onClick={() => close(null)}>
+        <Link href="/conta" prefetch={false} className="menu-account" onClick={() => close(null)}>
           <UserRound size={18} aria-hidden="true" /> Minha conta
         </Link>
         <Link
           href="/favoritos"
+          prefetch={false}
           className="menu-account"
           onClick={() => close(null)}
         >
@@ -57,6 +59,7 @@ export function MobileMenu() {
           <Link
             key={c.slug}
             href={`/categoria/${c.slug}`}
+            prefetch={false}
             aria-current={
               pathname === `/categoria/${c.slug}` ? "page" : undefined
             }

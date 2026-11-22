@@ -39,7 +39,7 @@ test("cadastro de cliente reflete na lista e no KPI de clientes do admin", async
   try {
     const signup = await page.request.post("/api/auth/signup", {
       headers: { Origin: ORIGIN },
-      data: { name: "Cliente Admin E2E", email, password: "senhaSegura123" },
+      data: { name: "Cliente Admin E2E", email, phone: "11988887777", password: "senhaSegura123" },
     });
     expect(signup.status()).toBe(201);
     expect((await signup.json()).data.passwordHash).toBeUndefined();

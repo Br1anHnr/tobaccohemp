@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { ArrowRight, Heart, Package, ShoppingBag } from "lucide-react";
 import { demoOrders } from "@/data/account-demo";
+import { formatPhone, formatZip } from "@/lib/auth";
 import { cartCount, useCart } from "@/store/cart-store";
 import { useAccount } from "@/store/account-store";
 import { OrderCard } from "./OrderHistory";
@@ -12,6 +13,10 @@ export function AccountOverview() {
   const favorites = useCart((s) => s.favorites);
   const open = useCart((s) => s.setOverlay);
   const latest = demoOrders[0];
+  const primaryAddress =
+    profile.addresses?.find((address) => address.isDefault) ??
+    profile.addresses?.[0] ??
+    null;
   return (
     <>
       <section className="account-stats" aria-label="Resumo da conta">
@@ -58,14 +63,27 @@ export function AccountOverview() {
           </div>
           <div>
             <dt>Telefone</dt>
-            <dd>{profile.phone}</dd>
+            <dd>{profile.phone ? formatPhone(profile.phone) : "Não informado"}</dd>
           </div>
           <div>
             <dt>Cidade</dt>
             <dd>
-              {profile.city} / {profile.state}
+              {profile.city || profile.state
+                ? `${profile.city}${profile.city && profile.state ? " / " : ""}${profile.state}`
+                : "Não informada"}
             </dd>
           </div>
+          {primaryAddress && (
+            <div className="profile-summary-wide">
+              <dt>Endereço principal</dt>
+              <dd>
+                {primaryAddress.street}, {primaryAddress.number}
+                {primaryAddress.complement ? ` — ${primaryAddress.complement}` : ""} ·{" "}
+                {primaryAddress.city}/{primaryAddress.state} · CEP{" "}
+                {formatZip(primaryAddress.zip)}
+              </dd>
+            </div>
+          )}
         </dl>
       </section>
     </>

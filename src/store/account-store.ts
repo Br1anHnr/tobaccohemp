@@ -4,7 +4,12 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import { demoProfile } from "@/data/account-demo";
 import { authClient, fetchCustomerSession, type SignInInput, type SignUpInput } from "@/lib/auth";
 import { STORAGE } from "@/lib/constants";
-import type { AuthResult, CustomerProfile } from "@/types/account";
+import type {
+  AuthResult,
+  CustomerAddress,
+  CustomerAddressInput,
+  CustomerProfile,
+} from "@/types/account";
 
 interface AccountState {
   /** True only while the visitor explores the demonstrative customer area. */
@@ -21,6 +26,22 @@ interface AccountState {
   signUp: (input: SignUpInput) => Promise<AuthResult>;
   signOut: () => Promise<void>;
   saveProfile: (profile: CustomerProfile) => Promise<AuthResult>;
+  saveAddress: (input: CustomerAddressInput) => Promise<AuthResult>;
+  updateAddress: (id: string, input: CustomerAddressInput) => Promise<AuthResult>;
+  deleteAddress: (id: string) => Promise<AuthResult>;
+}
+
+function applyAddresses(
+  customer: CustomerProfile,
+  addresses: CustomerAddress[],
+): CustomerProfile {
+  const primary = addresses.find((a) => a.isDefault) ?? addresses[0];
+  return {
+    ...customer,
+    city: customer.city || primary?.city || "",
+    state: customer.state || primary?.state || "",
+    addresses,
+  };
 }
 
 export const useAccount = create<AccountState>()(
@@ -58,6 +79,42 @@ export const useAccount = create<AccountState>()(
         }
         set({ profile });
         return { ok: true } as AuthResult;
+      },
+      saveAddress: async (input) => {
+        const current = get().customer;
+        if (!current) {
+          return { ok: false, code: "invalid", message: "Entre na sua conta para salvar endereços." };
+        }
+        const result = await authClient.saveAddress(input);
+        if (result.ok && result.addresses) {
+          const next = applyAddresses(current, result.addresses);
+          set({ customer: next, profile: next });
+        }
+        return result;
+      },
+      updateAddress: async (id, input) => {
+        const current = get().customer;
+        if (!current) {
+          return { ok: false, code: "invalid", message: "Entre na sua conta para editar endereços." };
+        }
+        const result = await authClient.updateAddress(id, input);
+        if (result.ok && result.addresses) {
+          const next = applyAddresses(current, result.addresses);
+          set({ customer: next, profile: next });
+        }
+        return result;
+      },
+      deleteAddress: async (id) => {
+        const current = get().customer;
+        if (!current) {
+          return { ok: false, code: "invalid", message: "Entre na sua conta para remover endereços." };
+        }
+        const result = await authClient.deleteAddress(id);
+        if (result.ok && result.addresses) {
+          const next = applyAddresses(current, result.addresses);
+          set({ customer: next, profile: next });
+        }
+        return result;
       },
     }),
     {

@@ -35,23 +35,56 @@ export const checkoutFields = [
   { name: "city", label: "Cidade", autoComplete: "address-level2" },
 ] as const;
 
-export function validateCheckout(data: FormData) {
+export const contactFields = checkoutFields.slice(0, 3);
+export const deliveryFields = checkoutFields.slice(3);
+
+export type CheckoutValues = {
+  name: string;
+  email: string;
+  phone: string;
+  zip: string;
+  address: string;
+  number: string;
+  complement: string;
+  city: string;
+  state: string;
+  demo: boolean;
+};
+
+export function validateCheckoutValues(values: CheckoutValues) {
   const errors: Record<string, string> = {};
-  for (const field of checkoutFields)
-    if (!("optional" in field) && !String(data.get(field.name) ?? "").trim())
+  for (const field of checkoutFields) {
+    const val = String(values[field.name] ?? "").trim();
+    if (!("optional" in field) && !val)
       errors[field.name] = `Preencha ${field.label.toLowerCase()}.`;
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(data.get("email"))))
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email.trim()))
     errors.email = "Informe um e-mail válido.";
-  const phone = String(data.get("phone")).replace(/\D/g, "");
+  const phone = values.phone.replace(/\D/g, "");
   if (phone.length < 10 || phone.length > 11)
     errors.phone = "Informe um telefone com DDD (10 ou 11 dígitos).";
-  if (String(data.get("zip")).replace(/\D/g, "").length !== 8)
+  if (values.zip.replace(/\D/g, "").length !== 8)
     errors.zip = "Informe um CEP com 8 dígitos.";
-  if (!/^[A-Z]{2}$/.test(String(data.get("state"))))
+  if (!/^[A-Z]{2}$/.test(values.state.trim().toUpperCase()))
     errors.state = "Selecione o estado.";
-  if (data.get("demo") !== "on")
+  if (!values.demo)
     errors.demo = "Confirme que este é um pedido demonstrativo.";
   return errors;
+}
+
+export function validateCheckout(data: FormData) {
+  return validateCheckoutValues({
+    name: String(data.get("name") ?? ""),
+    email: String(data.get("email") ?? ""),
+    phone: String(data.get("phone") ?? ""),
+    zip: String(data.get("zip") ?? ""),
+    address: String(data.get("address") ?? ""),
+    number: String(data.get("number") ?? ""),
+    complement: String(data.get("complement") ?? ""),
+    city: String(data.get("city") ?? ""),
+    state: String(data.get("state") ?? ""),
+    demo: data.get("demo") === "on",
+  });
 }
 
 export function evaluateCartEligibility(

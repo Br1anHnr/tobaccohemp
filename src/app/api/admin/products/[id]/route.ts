@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { saveProduct } from "@/modules/catalog";
+import { revalidateStorefrontCatalog } from "@/lib/storefront";
 import { adminRoute, jsonInput } from "@/shared/server/admin-http";
 import { adminMutation } from "@/shared/server/admin-mutation";
 export const runtime = "nodejs";
@@ -8,7 +9,9 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   return adminRoute(async request => {
     const { id } = await context.params;
     const input = await jsonInput(request);
-    return adminMutation(db => saveProduct(input, id, db));
+    const product = await adminMutation(db => saveProduct(input, id, db));
+    revalidateStorefrontCatalog();
+    return product;
   })(request);
 }
 
@@ -16,6 +19,8 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
 export async function DELETE(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   return adminRoute(async () => {
     const { id } = await context.params;
-    return adminMutation(db => saveProduct({ archived: true }, id, db));
+    const product = await adminMutation(db => saveProduct({ archived: true }, id, db));
+    revalidateStorefrontCatalog();
+    return product;
   })(request);
 }
