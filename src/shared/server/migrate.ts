@@ -12,7 +12,7 @@ interface Migration {
 // application order. The three `003_*` ids below were authored independently
 // by separate branches; they remain distinct strings (no primary-key
 // collision) and are kept stable so already-applied records are preserved.
-const migrations: Migration[] = [
+export const migrations: Migration[] = [
   {
     id: "001_init",
     sql: `
@@ -234,6 +234,30 @@ const migrations: Migration[] = [
     `,
   },
 ];
+
+migrations.push({
+  id: "005_asaas_sandbox",
+  sql: `
+    CREATE TABLE asaas_sandbox_attempts (
+      order_id TEXT PRIMARY KEY REFERENCES orders(id) ON DELETE CASCADE,
+      external_reference TEXT NOT NULL UNIQUE,
+      method TEXT NOT NULL CHECK (method IN ('pix','card')),
+      state TEXT NOT NULL CHECK (state IN ('prepared','creating','uncertain','ready','review')),
+      provider_id TEXT UNIQUE,
+      payment_id TEXT UNIQUE,
+      last_provider_status TEXT,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE TABLE asaas_sandbox_events (
+      event_id TEXT PRIMARY KEY,
+      event_type TEXT NOT NULL,
+      resource_id TEXT,
+      order_id TEXT REFERENCES orders(id) ON DELETE SET NULL,
+      result TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `,
+});
 
 let running: Promise<void> | undefined;
 

@@ -250,6 +250,7 @@ export async function createOrder(
   value: unknown,
   actor: { actorType: OrderActorType; actorId?: string | null },
   db: Db = pool(),
+  sandbox = false,
 ): Promise<OrderDetail> {
   if (ONLINE_COMMERCE_POLICY.realPaymentsEnabled) {
     throw new AdminError(
@@ -468,11 +469,18 @@ export async function createOrder(
       input.shippingCents ?? 0,
       input.discountCents ?? 0,
     );
+    if (sandbox && totals.totalCents <= 0) throw new AdminError(422, "SANDBOX_AMOUNT", "O pedido Sandbox deve ter valor positivo.");
 
     const orderId = randomUUID();
     const orderNumber = generateOrderNumber();
 
-    const intent = provider.createPaymentIntent({
+    const intent = sandbox ? {
+      provider: "asaas" as const,
+      providerReference: null,
+      checkoutUrl: null,
+      status: "pending_payment" as const,
+      notice: "Tentativa Asaas Sandbox registrada; aguardando confirmação pelo provedor.",
+    } : provider.createPaymentIntent({
       orderNumber,
       amountCents: totals.totalCents,
       currency: "BRL",
@@ -505,15 +513,15 @@ export async function createOrder(
         input.customerLabel ?? "Pedido demonstrativo",
         intent.status,
         input.channel,
-        intent.provider,
+        sandbox ? "asaas" : intent.provider,
         input.paymentMethod,
-        intent.providerReference,
-        intent.checkoutUrl,
+        sandbox ? null : intent.providerReference,
+        sandbox ? null : intent.checkoutUrl,
         totals.subtotalCents,
         totals.shippingCents,
         totals.discountCents,
         totals.totalCents,
-        true,
+        !sandbox,
         eligibility.eligibilityStatus,
         input.idempotencyKey ?? null,
         fingerprint,
@@ -569,15 +577,15 @@ export async function createOrder(
       [
         randomUUID(),
         orderId,
-        "Pedido demonstrativo criado com preços congelados e estoque reservado.",
+        sandbox ? "Pedido Asaas Sandbox criado com preços congelados e estoque sintético reservado." : "Pedido demonstrativo criado com preços congelados e estoque reservado.",
         actor.actorType,
         actor.actorId ?? null,
         draftMeta,
         createdAt,
         randomUUID(),
         intent.status,
-        intent.notice,
-        intent.provider,
+        sandbox ? "Tentativa Asaas Sandbox registrada; aguardando confirmação pelo provedor." : intent.notice,
+        sandbox ? "asaas" : intent.provider,
         intentMeta,
         intentAt,
       ],
@@ -594,6 +602,7 @@ async function applyStatusTransition(
   reasonInput: string | undefined,
   actor: { actorType: OrderActorType; actorId?: string | null },
   extraMetadata: Record<string, unknown> = {},
+  sandboxReconciliation = false,
 ): Promise<OrderDetail> {
   const currentRes = await tx.query(
     "SELECT status, expires_at, stock_status FROM orders WHERE id = $1 FOR UPDATE",
@@ -608,10 +617,14 @@ async function applyStatusTransition(
   ) as OrderStockStatus;
   const expiresAt = row.expires_at === null ? null : toIso(row.expires_at);
 
-  assertOrderTransition(fromStatus, toStatus);
+  if (fromStatus === toStatus && sandboxReconciliation) return getOrderDetail(id, tx);
+  if (!(sandboxReconciliation && (
+    (toStatus === "paid" && ["expired", "canceled"].includes(fromStatus)) ||
+    (toStatus === "refunded" && ["pending_payment", "expired", "canceled"].includes(fromStatus))
+  ))) assertOrderTransition(fromStatus, toStatus);
 
   if (
-    fromStatus === "pending_payment" &&
+    !sandboxReconciliation && fromStatus === "pending_payment" &&
     toStatus === "paid" &&
     expiresAt !== null &&
     new Date(expiresAt).getTime() <= Date.now()
@@ -628,6 +641,19 @@ async function applyStatusTransition(
   let stockAction: "none" | "committed" | "released" = "none";
   let releasedAt: string | null = null;
   const releasedItems: Array<{ productId: string; quantity: number }> = [];
+
+  // A late, provider-confirmed payment must reacquire a released reservation.
+  // The enclosing transaction rolls back every row if any item is unavailable.
+  if (sandboxReconciliation && toStatus === "paid" && currentStockStatus === "released") {
+    const items = await tx.query("SELECT product_id, SUM(quantity)::int AS qty FROM order_items WHERE order_id=$1 GROUP BY product_id ORDER BY product_id", [id]);
+    await tx.query("SELECT product_id FROM inventory WHERE product_id=ANY($1::text[]) ORDER BY product_id FOR UPDATE", [items.rows.map(r => r.product_id)]);
+    for (const item of items.rows) {
+      const result = await tx.query("UPDATE inventory SET quantity=quantity-$1, updated_at=$2 WHERE product_id=$3 AND quantity >= $1 RETURNING product_id", [item.qty, now, item.product_id]);
+      if (!result.rows.length) throw new AdminError(409, "LATE_PAYMENT_STOCK_REVIEW", "Pagamento tardio exige revisão de estoque.");
+    }
+    nextStockStatus = "committed";
+    stockAction = "committed";
+  }
 
   if (toStatus === "paid" && currentStockStatus === "reserved") {
     nextStockStatus = "committed";
@@ -717,9 +743,20 @@ export async function transitionOrderStatus(
   db: Db = pool(),
 ): Promise<OrderDetail> {
   const input = updateOrderStatusInput(value);
-  return withTransaction(db, (tx) =>
-    applyStatusTransition(tx, id, input.status, input.reason, actor),
-  );
+  return withTransaction(db, async (tx) => {
+    const order = await tx.query("SELECT payment_provider FROM orders WHERE id=$1 FOR UPDATE", [id]);
+    if (order.rows[0]?.payment_provider === "asaas") throw new AdminError(409, "PROVIDER_MANAGED", "Pedidos Asaas exigem reconciliação com o provedor.");
+    return applyStatusTransition(tx, id, input.status, input.reason, actor);
+  });
+}
+
+/** Internal provider boundary: caller already verified the provider response. */
+export async function reconcileSandboxOrder(tx: PoolClient, id: string, status: OrderStatus) {
+  const order = await tx.query("SELECT payment_provider, is_demo, status FROM orders WHERE id=$1 FOR UPDATE", [id]);
+  if (!order.rows.length || order.rows[0].payment_provider !== "asaas" || order.rows[0].is_demo !== false) throw new AdminError(409, "SANDBOX_ASSOCIATION", "Associação Sandbox inválida.");
+  const current = order.rows[0].status;
+  if (current === "refunded" || (current === "paid" && status !== "refunded") || (status === "pending_payment") || (["expired", "canceled"].includes(current) && ["expired", "canceled"].includes(status))) return getOrderDetail(id, tx);
+  return applyStatusTransition(tx, id, status, "Estado confirmado pelo Asaas Sandbox.", { actorType: "provider_webhook", actorId: "asaas-sandbox" }, { environment: "sandbox" }, true);
 }
 
 export async function expireOverdueOrders(
@@ -734,6 +771,7 @@ export async function expireOverdueOrders(
       `SELECT id
          FROM orders
         WHERE status = 'pending_payment'
+          AND payment_provider = 'demo'
           AND expires_at IS NOT NULL
           AND expires_at <= now()
         ORDER BY id ASC
@@ -756,6 +794,7 @@ export async function expireOverdueOrders(
 }
 
 export function summarizeOrders(orders: readonly Order[]): AdminOrderSummary {
+  orders = orders.filter(order => order.isDemo && order.paymentProvider === "demo");
   return {
     totalOrders: orders.length,
     pendingPaymentCount: orders.filter((o) => o.status === "pending_payment").length,

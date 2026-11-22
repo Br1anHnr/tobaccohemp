@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -27,6 +27,7 @@ import type { CustomerProfile } from "@/types/account";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Button } from "@/components/ui/Button";
 import { CartSummary } from "./CartSummary";
+import { AsaasSandboxCheckout } from "./AsaasSandboxCheckout";
 
 type CheckoutFieldKey = (typeof checkoutFields)[number]["name"] | "state";
 
@@ -70,10 +71,18 @@ export function CheckoutForm() {
   const [paymentMethod, setPaymentMethod] = useState<OrderPaymentMethod>("pix");
   const lock = useRef(false);
   const summary = useRef<HTMLDivElement>(null);
+  const [sandboxAvailable, setSandboxAvailable] = useState(false);
+  const [sandboxSelected, setSandboxSelected] = useState(false);
+  useEffect(() => {
+    void fetch("/api/checkout/asaas/config").then(r => r.json()).then(body => {
+      setSandboxAvailable(body.data?.enabled === true);
+      if (body.data?.enabled && new URLSearchParams(window.location.search).has("asaasOrder")) setSandboxSelected(true);
+    }).catch(() => {});
+  }, []);
 
   if (!cartHydrated || !accountHydrated)
     return <p role="status">Carregando sua seleção…</p>;
-  if (!items.length)
+  if (!items.length && !sandboxSelected)
     return <EmptyState title="Escolha seus essenciais primeiro." />;
 
   const eligibility = evaluateCartEligibility(items, products);
@@ -81,6 +90,9 @@ export function CheckoutForm() {
     overrides[name] ?? accountFieldDefault(customer, name);
   const setFieldValue = (name: CheckoutFieldKey, value: string) =>
     setOverrides((prev) => ({ ...prev, [name]: value }));
+
+  const sandboxToggle = sandboxAvailable && <label className="checkout-choice"><input type="checkbox" checked={sandboxSelected} onChange={event => setSandboxSelected(event.target.checked)} /> Usar Asaas Sandbox (teste sintético)</label>;
+  if (sandboxSelected) return <div className="commerce-columns checkout-columns"><div>{sandboxToggle}<AsaasSandboxCheckout /></div><aside className="summary-panel"><h2>Sua seleção de teste</h2><CartSummary checkout /></aside></div>;
 
   return (
     <div className="commerce-columns checkout-columns">
@@ -130,6 +142,7 @@ export function CheckoutForm() {
           }
         }}
       >
+        {sandboxToggle}
         <div className="demo-note">
           <Check size={17} aria-hidden="true" />
           <p>

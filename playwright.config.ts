@@ -3,7 +3,7 @@ const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? "http://127.0.0.1:3000";
 const port = Number(new URL(baseURL).port || 3000);
 export default defineConfig({
   testDir: "./tests",
-  testIgnore: "**/integration/**",
+  testIgnore: ["**/integration/**", "**/sandbox/**"],
   fullyParallel: true,
   retries: 0,
   workers: 2,

@@ -6,7 +6,7 @@ import { AdminError } from "@/shared/server/validation";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export const GET = adminRoute(() => listOrders(), { role: "operator" });
+export const GET = adminRoute(async () => (await listOrders()).filter(order => order.isDemo && order.paymentProvider === "demo"), { role: "operator" });
 
 export const POST = adminRoute(
   async (request, user) => {

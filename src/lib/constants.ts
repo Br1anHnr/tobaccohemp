@@ -9,6 +9,11 @@ export const STORE = {
   hours: "",
   email: "",
 };
+export const ASAAS_SANDBOX = {
+  apiBase: "https://api-sandbox.asaas.com/v3",
+  checkoutBase: "https://sandbox.asaas.com/checkoutSession/show",
+  notice: "Asaas Sandbox · teste sintético sem valor financeiro",
+};
 export const STORAGE = {
   cart: "th-cart-v1",
   age: "th-age-confirmed",

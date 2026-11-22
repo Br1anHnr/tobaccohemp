@@ -54,6 +54,7 @@ export function AdminSidebar({
         ))}
 
         <p className="admin-nav__group">Comercial</p>
+        <Link href="/admin/asaas" className="admin-nav__link" onClick={onClose} aria-current={pathname === "/admin/asaas" ? "page" : undefined}>Asaas Sandbox</Link>
         <Link
           href="/admin/pedidos"
           className="admin-nav__link"

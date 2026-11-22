@@ -3,7 +3,7 @@ import type { NextRequest } from "next/server";
 /** Server-only opt-in. Never infer authorization from a caller's headers. */
 export function previewOrigin(): string | null {
   if (process.env.VERCEL !== "1" || process.env.VERCEL_ENV !== "preview" ||
-      process.env.VERCEL_GIT_COMMIT_REF !== "homologacao/funcional-e2e" ||
+      !["homologacao/funcional-e2e", "sandbox/asaas-preview"].includes(process.env.VERCEL_GIT_COMMIT_REF ?? "") ||
       process.env.PREVIEW_BACKEND_ENABLED !== "1") return null;
   try {
     const url = new URL(process.env.APP_ORIGIN ?? "");

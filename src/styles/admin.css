@@ -265,6 +265,12 @@
 }
 
 /* Cartões de indicador ------------------------------------------------- */
+.asaas-dashboard { display: grid; gap: 24px; }
+.asaas-dashboard > h2 { font-size: 20px; font-weight: 600; margin: 8px 0 0; }
+.asaas-order-card { display: grid; gap: 12px; }
+.asaas-order-card h3 { font-size: 18px; font-weight: 600; }
+.asaas-order-card p { color: var(--muted); }
+.asaas-dashboard > ul { display: grid; gap: 12px; color: var(--muted); font-size: 14px; }
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
