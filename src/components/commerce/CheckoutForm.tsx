@@ -1,8 +1,16 @@
 "use client";
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Check, ArrowRight, ShieldCheck } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowRight,
+  Check,
+  ShieldCheck,
+  UserCheck,
+} from "lucide-react";
 import { useCart } from "@/store/cart-store";
+import { useAccount } from "@/store/account-store";
 import { useCatalog } from "@/store/catalog-store";
 import { useOrder } from "@/store/order-store";
 import { BRAZIL_STATES, STORAGE } from "@/lib/constants";
@@ -15,17 +23,46 @@ import {
 } from "@/lib/checkout";
 import { ONLINE_COMMERCE_POLICY } from "@/modules/orders/domain/eligibility";
 import type { OrderChannel, OrderPaymentMethod } from "@/shared/contracts/orders";
+import type { CustomerProfile } from "@/types/account";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Button } from "@/components/ui/Button";
 import { CartSummary } from "./CartSummary";
 
+type CheckoutFieldKey = (typeof checkoutFields)[number]["name"] | "state";
+
+function accountFieldDefault(
+  customer: CustomerProfile | null,
+  field: CheckoutFieldKey,
+): string {
+  if (!customer) return "";
+  switch (field) {
+    case "name":
+      return customer.name;
+    case "email":
+      return customer.email;
+    case "phone":
+      return customer.phone;
+    case "city":
+      return customer.city;
+    case "state":
+      return customer.state;
+    default:
+      return "";
+  }
+}
+
 export function CheckoutForm() {
   const items = useCart((s) => s.items);
-  const hydrated = useCart((s) => s.hydrated);
+  const cartHydrated = useCart((s) => s.hydrated);
+  const accountHydrated = useAccount((s) => s.hydrated);
+  const customer = useAccount((s) => s.customer);
   const products = useCatalog((s) => s.products);
   const clear = useCart((s) => s.clear);
   const setOrder = useOrder((s) => s.setOrder);
   const router = useRouter();
+  const [overrides, setOverrides] = useState<
+    Partial<Record<CheckoutFieldKey, string>>
+  >({});
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [eligibilityError, setEligibilityError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -34,11 +71,16 @@ export function CheckoutForm() {
   const lock = useRef(false);
   const summary = useRef<HTMLDivElement>(null);
 
-  if (!hydrated) return <p role="status">Carregando sua seleção…</p>;
+  if (!cartHydrated || !accountHydrated)
+    return <p role="status">Carregando sua seleção…</p>;
   if (!items.length)
     return <EmptyState title="Escolha seus essenciais primeiro." />;
 
   const eligibility = evaluateCartEligibility(items, products);
+  const fieldValue = (name: CheckoutFieldKey) =>
+    overrides[name] ?? accountFieldDefault(customer, name);
+  const setFieldValue = (name: CheckoutFieldKey, value: string) =>
+    setOverrides((prev) => ({ ...prev, [name]: value }));
 
   return (
     <div className="commerce-columns checkout-columns">
@@ -98,6 +140,25 @@ export function CheckoutForm() {
           </p>
         </div>
 
+        {customer && (
+          <div className="checkout-account-banner" role="status">
+            <UserCheck size={18} aria-hidden="true" />
+            <div>
+              <p className="checkout-account-title">
+                Sessão ativa: <strong>{customer.name}</strong> ({customer.email})
+              </p>
+              <p className="checkout-account-copy">
+                Seus dados cadastrais foram reaproveitados automaticamente —
+                nenhum novo cadastro é necessário. Preencha apenas os dados
+                restantes de entrega para o pedido demonstrativo.
+              </p>
+              <Link href="/conta/perfil" className="text-link">
+                Gerenciar dados da conta
+              </Link>
+            </div>
+          </div>
+        )}
+
         {(!eligibility.allowed || eligibilityError) && (
           <div className="error-summary" role="alert">
             <strong>
@@ -127,8 +188,14 @@ export function CheckoutForm() {
         )}
 
         <fieldset>
-          <legend>Seus dados</legend>
-          <p className="muted">Campos obrigatórios, exceto complemento.</p>
+          <legend>
+            {customer ? "Dados do pedido e entrega" : "Seus dados"}
+          </legend>
+          <p className="muted">
+            {customer
+              ? "Dados da sua conta já preenchidos abaixo. Campos obrigatórios, exceto complemento."
+              : "Campos obrigatórios, exceto complemento. Você pode finalizar como visitante, sem criar conta."}
+          </p>
           <div className="form-grid">
             {checkoutFields.map((field) => (
               <label
@@ -148,6 +215,10 @@ export function CheckoutForm() {
                   type={"type" in field ? field.type : "text"}
                   autoComplete={field.autoComplete}
                   required={!("optional" in field)}
+                  value={fieldValue(field.name)}
+                  onChange={(event) =>
+                    setFieldValue(field.name, event.target.value)
+                  }
                   maxLength={
                     field.name === "phone" ? 20 : field.name === "zip" ? 9 : 160
                   }
@@ -170,7 +241,8 @@ export function CheckoutForm() {
                 id="checkout-state"
                 name="state"
                 autoComplete="address-level1"
-                defaultValue=""
+                value={fieldValue("state")}
+                onChange={(event) => setFieldValue("state", event.target.value)}
                 required
                 aria-invalid={Boolean(errors.state)}
                 aria-describedby={errors.state ? "error-state" : undefined}

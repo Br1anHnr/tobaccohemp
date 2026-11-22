@@ -11,7 +11,7 @@ import {
 } from "@/lib/auth";
 import { useAccount } from "@/store/account-store";
 import type { AuthResult } from "@/types/account";
-import { Button } from "@/components/ui/Button";
+import { Button, ButtonLink } from "@/components/ui/Button";
 import {
   CheckboxField,
   FormField,
@@ -28,6 +28,7 @@ const submitLabel: Record<Mode, string> = {
 
 export function AuthForm({ mode }: { mode: Mode }) {
   const router = useRouter();
+  const customer = useAccount((s) => s.customer);
   const signIn = useAccount((s) => s.signIn);
   const signUp = useAccount((s) => s.signUp);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -36,6 +37,31 @@ export function AuthForm({ mode }: { mode: Mode }) {
   const summary = useRef<HTMLDivElement>(null);
   const notice = useRef<HTMLDivElement>(null);
   const id = (name: string) => `${mode}-${name}`;
+
+  if (customer && (mode === "signin" || mode === "signup")) {
+    return (
+      <div className="auth-already-signed-in">
+        <div className="auth-notice is-success" role="status">
+          <Info size={17} aria-hidden="true" />
+          <div>
+            <p>
+              Você já está conectado como <strong>{customer.name}</strong> (
+              {customer.email}).
+            </p>
+          </div>
+        </div>
+        <div className="account-links">
+          <ButtonLink href="/conta">Ir para minha conta</ButtonLink>
+          <ButtonLink href="/carrinho" variant="secondary">
+            Ver meu carrinho
+          </ButtonLink>
+          <ButtonLink href="/loja" variant="ghost">
+            Continuar explorando
+          </ButtonLink>
+        </div>
+      </div>
+    );
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

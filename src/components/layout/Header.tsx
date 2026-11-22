@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Search, UserRound, ShoppingBag, Menu } from "lucide-react";
 import { navigation } from "@/data/navigation";
 import { cartCount, useCart } from "@/store/cart-store";
+import { useAccount } from "@/store/account-store";
 import { Container } from "./Container";
 import { Logo } from "./Logo";
 export function Header() {
@@ -12,6 +13,7 @@ export function Header() {
   const [scrolled, setScrolled] = useState(false);
   const items = useCart((s) => s.items);
   const open = useCart((s) => s.setOverlay);
+  const customer = useAccount((s) => s.customer);
   useEffect(() => {
     const scroll = () => setScrolled(window.scrollY > 30);
     scroll();
@@ -53,11 +55,13 @@ export function Header() {
             <kbd>/</kbd>
           </button>
           <button
-            className="icon-button account-button"
+            className={`icon-button account-button ${customer ? "is-authenticated" : ""}`}
             onClick={() => open("account")}
             aria-label="Minha conta"
+            data-authenticated={customer ? "true" : "false"}
           >
             <UserRound size={21} aria-hidden="true" />
+            {customer && <span className="account-dot" aria-hidden="true" />}
           </button>
           <button
             className="icon-button cart-trigger"

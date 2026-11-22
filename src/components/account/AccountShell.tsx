@@ -19,15 +19,22 @@ export function AccountShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { demo, hydrated, customer, startDemo, endDemo, signOut, loadSession, profile } = useAccount();
-  const [resolving, setResolving] = useState(() => !customer && !demo);
+  const [resolving, setResolving] = useState(true);
 
-  // Resolve the session cookie only inside the customer area (not on store pages).
+  // Resolve the session cookie when not already hydrated from server or client state.
   useEffect(() => {
-    if (customer || demo) return;
-    loadSession().finally(() => setResolving(false));
-  }, [customer, demo, loadSession]);
+    if (!hydrated || customer || demo) return;
+    let cancelled = false;
+    loadSession().finally(() => {
+      if (!cancelled) setResolving(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrated, customer, demo, loadSession]);
 
-  if (!hydrated || resolving) return <PageSkeleton label="Carregando sua conta…" />;
+  if (!hydrated || (!customer && !demo && resolving))
+    return <PageSkeleton label="Carregando sua conta…" />;
 
   if (!customer && !demo)
     return (

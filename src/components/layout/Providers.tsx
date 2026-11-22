@@ -1,11 +1,12 @@
 "use client";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { MotionConfig } from "motion/react";
 import { useCart } from "@/store/cart-store";
 import { useAccount } from "@/store/account-store";
 import { useCatalog } from "@/store/catalog-store";
 import type { Product } from "@/types/product";
 import type { Category } from "@/types/category";
+import type { CustomerProfile } from "@/types/account";
 import { CartDrawer } from "@/components/commerce/CartDrawer";
 import { SearchOverlay } from "@/components/search/SearchOverlay";
 import { AgeGate } from "@/components/age/AgeGate";
@@ -26,7 +27,7 @@ function AccountPreview() {
       description={
         authed
           ? customer
-            ? "Você está conectado à sua conta."
+            ? `Você está conectado como ${customer.name} (${customer.email}).`
             : "Você está navegando na área do cliente demonstrativa."
           : "Entre para acompanhar seus dados e pedidos, ou continue comprando como visitante."
       }
@@ -61,12 +62,24 @@ export function Providers({
   children,
   products,
   categories,
+  initialCustomer = null,
 }: {
   children: ReactNode;
   products: Product[];
   categories: Category[];
+  initialCustomer?: CustomerProfile | null;
 }) {
   const storageError = useCart((s) => s.storageError);
+  const appliedCustomerKey = useRef<string | null>(null);
+  const initialCustomerKey = initialCustomer
+    ? JSON.stringify([
+        initialCustomer.name,
+        initialCustomer.email,
+        initialCustomer.phone,
+        initialCustomer.city,
+        initialCustomer.state,
+      ])
+    : null;
   useEffect(() => {
     // Seed the runtime catalog before rehydrating the cart, whose `merge`
     // validates persisted items against the product list.
@@ -74,10 +87,20 @@ export function Providers({
     Promise.resolve(useCart.persist.rehydrate()).finally(() =>
       useCart.setState({ hydrated: true }),
     );
-    Promise.resolve(useAccount.persist.rehydrate()).finally(() =>
-      useAccount.setState({ hydrated: true }),
-    );
-  }, [products, categories]);
+    Promise.resolve(useAccount.persist.rehydrate()).finally(() => {
+      if (initialCustomer && appliedCustomerKey.current !== initialCustomerKey) {
+        appliedCustomerKey.current = initialCustomerKey;
+        useAccount.setState({
+          customer: initialCustomer,
+          profile: initialCustomer,
+          demo: false,
+          hydrated: true,
+        });
+        return;
+      }
+      useAccount.setState({ hydrated: true });
+    });
+  }, [products, categories, initialCustomer, initialCustomerKey]);
   return (
     <MotionConfig reducedMotion="user">
       {children}

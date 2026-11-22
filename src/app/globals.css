@@ -318,6 +318,19 @@ main:focus {
   color: #8d8c85;
   font-size: 10px;
 }
+.account-button {
+  position: relative;
+}
+.account-dot {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--brand-green);
+  box-shadow: 0 0 0 2px #080808;
+}
 .cart-trigger {
   position: relative;
 }
@@ -1498,6 +1511,37 @@ main:focus {
 .demo-note svg {
   flex-shrink: 0;
   margin-top: 3px;
+}
+.checkout-account-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+  background: #152013;
+  color: #cfe5b9;
+  border: 1px solid #3e5a2a;
+  border-radius: 5px;
+  padding: 16px;
+  font-size: 12px;
+  margin-bottom: 26px;
+}
+.checkout-account-banner svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--brand-green);
+}
+.checkout-account-title {
+  color: var(--foreground);
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+.checkout-account-copy {
+  color: #cfe5b9;
+  line-height: 1.5;
+}
+.checkout-account-banner .text-link {
+  margin-top: 6px;
+  padding-bottom: 0;
+  color: var(--brand-yellow);
 }
 .checkout-columns fieldset {
   border: 0;

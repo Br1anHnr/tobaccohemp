@@ -78,6 +78,100 @@ test("sign-up creates an account and opens the customer area", async ({ page }) 
   await expect(page.locator(".account-hello")).toContainText("Maria");
 });
 
+test("signed-in customer reuses account data in demo checkout without re-registering", async ({
+  page,
+}, testInfo) => {
+  await page.route("**/api/auth/session", signedOutSession);
+  await page.route("**/api/auth/signup", (route) => {
+    const body = route.request().postDataJSON();
+    return route.fulfill({
+      status: 201,
+      json: {
+        data: {
+          id: "e2e-checkout",
+          name: body.name,
+          email: body.email,
+          phone: "11988887777",
+          city: "São Paulo",
+          state: "SP",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+    });
+  });
+
+  await enter(page, "/conta/cadastro");
+  await page.getByLabel("Nome completo").fill("Marina Checkout");
+  await page.getByLabel("E-mail", { exact: true }).fill("marina.demo@example.test");
+  await page.getByLabel("Senha", { exact: true }).fill("senhaSegura123");
+  await page.getByLabel("Confirmar senha").fill("senhaSegura123");
+  await page.getByRole("checkbox", { name: /18 anos/ }).check();
+  await page.getByRole("checkbox", { name: /termos de uso/ }).check();
+  await page.getByRole("button", { name: "Criar conta", exact: true }).click();
+  await expect(page).toHaveURL(/\/conta$/);
+
+  if (testInfo.project.name === "desktop") {
+    await page.getByRole("button", { name: "Minha conta" }).click();
+    const accountModal = page.getByRole("dialog");
+    await expect(accountModal).toContainText("Marina Checkout");
+    await expect(accountModal.getByRole("link", { name: "Ir para minha conta" })).toBeVisible();
+    await expect(accountModal.getByRole("link", { name: "Criar conta" })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await page
+      .getByRole("navigation", { name: "Navegação principal" })
+      .getByRole("link", { name: "Loja", exact: true })
+      .click();
+  } else {
+    await page.getByRole("button", { name: "Abrir menu" }).click();
+    await page
+      .getByRole("navigation", { name: "Menu mobile" })
+      .getByRole("link", { name: "Loja", exact: true })
+      .click();
+  }
+  await expect(page).toHaveURL(/\/loja$/);
+  await page.locator(".product-card a").first().click();
+  await page.locator("button:has-text('Adicionar')").first().click();
+  await page
+    .getByRole("dialog")
+    .getByRole("link", { name: /Finalizar pedido/ })
+    .click();
+  await expect(page).toHaveURL(/\/checkout$/);
+
+  await expect(page.locator(".checkout-account-banner")).toContainText("Marina Checkout");
+  await expect(page.locator(".checkout-account-banner")).toContainText("marina.demo@example.test");
+  await expect(page.locator("#checkout-name")).toHaveValue("Marina Checkout");
+  await expect(page.locator("#checkout-email")).toHaveValue("marina.demo@example.test");
+  await expect(page.locator("#checkout-phone")).toHaveValue("11988887777");
+  await expect(page.locator("#checkout-city")).toHaveValue("São Paulo");
+  await expect(page.locator("#checkout-state")).toHaveValue("SP");
+
+  const axe = await new AxeBuilder({ page })
+    .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
+    .analyze();
+  expect(axe.violations).toEqual([]);
+
+  await page.locator("#checkout-zip").fill("01001000");
+  await page.locator("#checkout-address").fill("Rua Ficticia");
+  await page.locator("#checkout-number").fill("42");
+  await page
+    .getByLabel("Entendo que este pedido é apenas uma demonstração.")
+    .check();
+  await page
+    .getByRole("button", { name: "Finalizar pedido", exact: true })
+    .click();
+  await expect(page).toHaveURL(/pedido-confirmado/);
+  await expect(
+    page.getByRole("heading", { name: "PEDIDO RECEBIDO." }),
+  ).toBeVisible();
+
+  const stored = await page.evaluate(() =>
+    JSON.stringify({ ...localStorage, ...sessionStorage }),
+  );
+  expect(stored).not.toContain("marina.demo@example.test");
+  expect(stored).not.toContain("Marina Checkout");
+  expect(stored).not.toContain("senhaSegura123");
+});
+
 test("password recovery requests a reset and applies a new password", async ({ page }) => {
   await page.route("**/api/auth/session", signedOutSession);
   await page.route("**/api/auth/password/forgot", (route) =>
