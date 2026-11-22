@@ -91,6 +91,7 @@ export function CheckoutForm() {
   const summary = useRef<HTMLDivElement>(null);
   const [sandboxAvailable, setSandboxAvailable] = useState(false);
   const [sandboxSelected, setSandboxSelected] = useState(false);
+  const [sandboxConfigReady, setSandboxConfigReady] = useState(false);
   useEffect(() => {
     void fetch("/api/checkout/asaas/config").then(r => r.json()).then(body => {
       const enabled = body.data?.enabled === true;
@@ -106,10 +107,22 @@ export function CheckoutForm() {
       } catch {
         /* Ignore storage restrictions. */
       }
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => setSandboxConfigReady(true));
   }, []);
 
-  if (!cartHydrated || !accountHydrated)
+  let hasAsaasLookup = false;
+  if (cartHydrated && accountHydrated && typeof window !== "undefined") {
+    hasAsaasLookup = new URLSearchParams(window.location.search).has("asaasOrder");
+    if (!hasAsaasLookup) {
+      try {
+        hasAsaasLookup = Boolean(sessionStorage.getItem("th-asaas-sandbox-attempt"));
+      } catch {
+        /* Ignore storage restrictions. */
+      }
+    }
+  }
+
+  if (!cartHydrated || !accountHydrated || (!items.length && !sandboxSelected && !sandboxConfigReady && hasAsaasLookup))
     return <p role="status">Carregando sua seleção…</p>;
   if (!items.length && !sandboxSelected)
     return <EmptyState title="Escolha seus essenciais primeiro." />;

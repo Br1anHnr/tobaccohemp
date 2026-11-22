@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Info, LoaderCircle } from "lucide-react";
@@ -26,6 +26,10 @@ const submitLabel: Record<Mode, string> = {
   reset: "Enviar instruções",
 };
 
+const subscribeHydration = () => () => {};
+const isClientHydrated = () => true;
+const isServerHydrated = () => false;
+
 export function AuthForm({ mode }: { mode: Mode }) {
   const router = useRouter();
   const customer = useAccount((s) => s.customer);
@@ -34,6 +38,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<AuthResult | null>(null);
+  const hydrated = useSyncExternalStore(subscribeHydration, isClientHydrated, isServerHydrated);
   const summary = useRef<HTMLDivElement>(null);
   const notice = useRef<HTMLDivElement>(null);
   const id = (name: string) => `${mode}-${name}`;
@@ -117,7 +122,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
   }
 
   return (
-    <form className="auth-form" noValidate onSubmit={submit} aria-busy={pending}>
+    <form className="auth-form" method="post" noValidate onSubmit={submit} aria-busy={pending}>
       <FormErrorSummary errors={errors} prefix={mode} ref={summary} />
       {result && (
         <div
@@ -222,7 +227,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
           Esqueceu sua senha?
         </Link>
       )}
-      <Button type="submit" className="auth-submit" disabled={pending}>
+      <Button type="submit" className="auth-submit" disabled={pending || !hydrated}>
         {pending && <LoaderCircle size={17} className="spin" aria-hidden="true" />}
         {pending ? "Enviando…" : submitLabel[mode]}
       </Button>
