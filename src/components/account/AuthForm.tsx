@@ -30,6 +30,8 @@ const subscribeHydration = () => () => {};
 const isClientHydrated = () => true;
 const isServerHydrated = () => false;
 
+const SAFE_NEXT_RE = /^\/(?:checkout|conta(?:\/(?:pedidos|perfil))?|admin\/teste-pagamento)$/;
+
 export function AuthForm({ mode }: { mode: Mode }) {
   const router = useRouter();
   const customer = useAccount((s) => s.customer);
@@ -114,7 +116,8 @@ export function AuthForm({ mode }: { mode: Mode }) {
         requestAnimationFrame(() => notice.current?.focus());
         return;
       }
-      router.push("/conta");
+      const rawNext = new URLSearchParams(window.location.search).get("next") ?? "";
+      router.push(SAFE_NEXT_RE.test(rawNext) ? rawNext : "/conta");
       return;
     }
     setResult(response);

@@ -219,7 +219,7 @@ test("full E2E without mocks: signup with phone, persisted address, repeat check
     await expect(page.locator(".account-hello")).toContainText("Helena");
     await expect(page.locator(".profile-summary")).toContainText("(11) 97777-6666");
 
-    // 3. First checkout: name, email and phone prefilled; enter address and save to account
+    // 3. First checkout: signed-in customer data is prefilled; save address to Neon
     await page.goto("/produto/case-compact-preto");
     await page.getByRole("button", { name: "Adicionar Case Compact Preto ao carrinho" }).click();
     await page.getByRole("dialog").getByRole("link", { name: /Finalizar pedido/ }).click();
@@ -227,9 +227,8 @@ test("full E2E without mocks: signup with phone, persisted address, repeat check
     await page.reload();
 
     await expect(page.locator(".checkout-account-banner")).toContainText("Helena Ficticia");
-    await expect(page.locator("#checkout-name")).toHaveValue("Helena Ficticia");
-    await expect(page.locator("#checkout-email")).toHaveValue(emailA);
-    await expect(page.locator("#checkout-phone")).toHaveValue("11977776666");
+    await expect(page.locator(".checkout-account-banner")).toContainText(emailA);
+    await expect(page.locator(".checkout-account-banner")).toContainText("(11) 97777-6666");
 
     await page.locator("#checkout-zip").fill("13010000");
     await page.locator("#checkout-address").fill("Rua das Palmeiras");
@@ -238,14 +237,10 @@ test("full E2E without mocks: signup with phone, persisted address, repeat check
     await page.locator("#checkout-city").fill("Campinas");
     await page.locator("#checkout-state").selectOption("SP");
     await page.locator("#checkout-address-label").fill("Casa");
-    await expect(page.locator("#checkout-save-address")).toBeChecked();
+    await page.getByRole("button", { name: "Salvar endereço na conta" }).click();
 
-    await page.getByLabel("Entendo que este pedido é apenas uma demonstração.").check();
-    await page.getByRole("button", { name: "Finalizar pedido", exact: true }).click();
-
-    await expect(page).toHaveURL(/\/pedido-confirmado$/);
-    await expect(page.getByRole("heading", { name: "PEDIDO RECEBIDO." })).toBeVisible();
-    await expect(page.locator(".confirmation")).toContainText("Nenhuma cobrança foi realizada.");
+    await expect(page.locator(".checkout-saved-addresses")).toContainText("Rua das Palmeiras, 250");
+    await expect(page.locator("#checkout-address")).toHaveCount(0);
 
     // Verify address persisted in profile page after reload
     await page.goto("/conta/perfil");
@@ -270,6 +265,8 @@ test("full E2E without mocks: signup with phone, persisted address, repeat check
     await expect(page.locator(".checkout-saved-addresses")).toContainText("Rua das Palmeiras, 250");
     await expect(page.locator(".checkout-saved-addresses")).toContainText("Campinas/SP");
     await expect(page.locator("#checkout-address")).toHaveCount(0); // Compact view: no repetitive inputs!
+    await expect(page.getByText("Pagamentos online indisponíveis para pedidos comerciais.")).toBeVisible();
+    await expect(page.getByText("PEDIDO RECEBIDO.")).toHaveCount(0);
 
     // Check desktop/mobile horizontal fit and WCAG accessibility on repeat checkout
     expect(
@@ -296,19 +293,9 @@ test("full E2E without mocks: signup with phone, persisted address, repeat check
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole("heading", { name: /SEU ESTILO/i, level: 1 })).toBeVisible();
 
-    // Return to /checkout and complete repeat order WITHOUT retyping any field
+    // 5. Return to /checkout: test "Novo endereço" saving directly to Neon
     await page.goto("/checkout");
-    await page.getByLabel("Entendo que este pedido é apenas uma demonstração.").check();
-    await page.getByRole("button", { name: "Finalizar pedido", exact: true }).click();
-    await expect(page).toHaveURL(/\/pedido-confirmado$/);
-    await expect(page.getByRole("heading", { name: "PEDIDO RECEBIDO." })).toBeVisible();
-
-    // 5. Third checkout: test "Novo endereço" and delivery editing
-    await page.goto("/produto/case-compact-preto");
-    await page.getByRole("button", { name: "Adicionar Case Compact Preto ao carrinho" }).click();
-    await page.getByRole("dialog").getByRole("link", { name: /Finalizar pedido/ }).click();
-    await expect(page).toHaveURL(/\/checkout$/);
-
+    await expect(page.locator(".checkout-saved-addresses")).toContainText("Rua das Palmeiras, 250");
     await page.getByRole("button", { name: "Novo endereço" }).click();
     await page.locator("#checkout-zip").fill("01310100");
     await page.locator("#checkout-address").fill("Avenida Paulista");
@@ -316,9 +303,8 @@ test("full E2E without mocks: signup with phone, persisted address, repeat check
     await page.locator("#checkout-city").fill("São Paulo");
     await page.locator("#checkout-state").selectOption("SP");
     await page.locator("#checkout-address-label").fill("Trabalho");
-    await page.getByLabel("Entendo que este pedido é apenas uma demonstração.").check();
-    await page.getByRole("button", { name: "Finalizar pedido", exact: true }).click();
-    await expect(page).toHaveURL(/\/pedido-confirmado$/);
+    await page.getByRole("button", { name: "Salvar endereço na conta" }).click();
+    await expect(page.locator(".checkout-saved-addresses")).toContainText("Avenida Paulista, 1000");
 
     const addrListAfter = (await (await page.request.get("/api/auth/addresses")).json()).data as Array<{ street: string }>;
     expect(addrListAfter).toHaveLength(2);
@@ -391,27 +377,9 @@ test("full E2E without mocks: signup with phone, persisted address, repeat check
 
       await expect(guestPage.locator(".checkout-account-banner")).toHaveCount(0);
       await expect(guestPage.locator("#checkout-save-address")).toHaveCount(0);
-
-      await guestPage.locator("#checkout-name").fill("Visitante Teste");
-      await guestPage.locator("#checkout-email").fill("visitante@example.test");
-      await guestPage.locator("#checkout-phone").fill("11955554444");
-      await guestPage.locator("#checkout-zip").fill("01001000");
-      await guestPage.locator("#checkout-address").fill("Praça da Sé");
-      await guestPage.locator("#checkout-number").fill("10");
-      await guestPage.locator("#checkout-city").fill("São Paulo");
-      await guestPage.locator("#checkout-state").selectOption("SP");
-      await guestPage.getByLabel("Entendo que este pedido é apenas uma demonstração.").check();
-      await guestPage.getByRole("button", { name: "Finalizar pedido", exact: true }).click();
-
-      await expect(guestPage).toHaveURL(/\/pedido-confirmado$/);
-      await expect(guestPage.getByRole("heading", { name: "PEDIDO RECEBIDO." })).toBeVisible();
-
-      const guestStored = await guestPage.evaluate(() =>
-        JSON.stringify({ ...localStorage, ...sessionStorage }),
-      );
-      expect(guestStored).not.toContain("visitante@example.test");
-      expect(guestStored).not.toContain("Visitante Teste");
-      expect(guestStored).not.toContain("Praça da Sé");
+      await expect(guestPage.getByRole("link", { name: "Entrar na conta" })).toBeVisible();
+      await expect(guestPage.getByText("Pagamentos online indisponíveis para pedidos comerciais.")).toBeVisible();
+      await expect(guestPage.getByText("PEDIDO RECEBIDO.")).toHaveCount(0);
 
       // Demo customer area still works for anonymous visitors
       await guestPage.goto("/conta");

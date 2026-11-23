@@ -87,6 +87,7 @@ test.beforeEach(async ({ page }) => {
     );
   });
   await page.route("**/api/checkout/asaas/config", (route) => route.fulfill({ json: { data: { enabled: true } } }));
+  await page.route("**/api/auth/addresses", (route) => route.fulfill({ json: { data: syntheticAccount.addresses } }));
   await page.route("**/api/auth/login", (route) =>
     route.fulfill({
       json: {
@@ -278,4 +279,114 @@ test("Sandbox admin dashboard separates test totals, stock/history, diagnostics 
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   await page.screenshot({ path: `.preview-validation/asaas-dashboard-${info.project.name}.png`, fullPage: true });
+});
+
+test("Admin Sandbox test checkout persists/reuses customer address cleanly and redirects card to hosted Asaas", async ({ page }) => {
+  const addresses: Array<Record<string, unknown>> = [];
+  let failSave = true;
+  let adminCheckoutCalls = 0;
+
+  await page.route("**/api/admin/auth/session", (route) =>
+    route.fulfill({ json: { data: { id: "synthetic-admin", name: "Admin Sintético", email: "admin@example.test", role: "admin" } } }),
+  );
+  await page.route("**/api/auth/session", (route) =>
+    route.fulfill({ json: { data: { ...syntheticAccount, addresses } } }),
+  );
+  await page.route("**/api/auth/addresses", async (route) => {
+    if (route.request().method() === "GET") {
+      return route.fulfill({ json: { data: addresses } });
+    }
+    if (failSave) {
+      failSave = false;
+      return route.fulfill({
+        status: 500,
+        json: { error: { code: "INTERNAL_ERROR", message: "Falha simulada ao salvar endereço." } },
+      });
+    }
+    const body = route.request().postDataJSON();
+    const saved = {
+      id: "addr-admin-1",
+      label: body.label || "Principal",
+      zip: body.zip.replace(/\D/g, ""),
+      street: body.street,
+      number: body.number,
+      complement: body.complement ?? "",
+      city: body.city,
+      state: body.state,
+      isDefault: true,
+      updatedAt: now,
+    };
+    addresses.splice(0, addresses.length, saved);
+    return route.fulfill({ status: 201, json: { data: { address: saved, addresses } } });
+  });
+  await page.route("**/api/admin/asaas", (route) =>
+    route.fulfill({
+      json: {
+        data: {
+          environment: "sandbox",
+          notice: "Testes sintéticos sem receita real",
+          summary: [],
+          attempts: [],
+          history: [],
+          products: [
+            {
+              id: "case-01",
+              sku: "CASE-COMPACT-PRETO",
+              slug: "case-compact-preto",
+              name: "Case Compact Preto",
+              price_cents: 4990,
+              variants: ["Preto"],
+              stock: 10,
+            },
+          ],
+        },
+      },
+    }),
+  );
+  await page.route("**/api/admin/asaas/checkout", (route) => {
+    adminCheckoutCalls++;
+    return route.fulfill({
+      json: {
+        data: {
+          ...receipt("card"),
+          order: {
+            ...receipt("card").order,
+            checkoutUrl: "https://sandbox.asaas.com/checkoutSession/show?id=checkout_admin_redirect",
+          },
+          sandboxStock: [{ productId: "case-01", productName: "Case Compact Preto", quantity: 9 }],
+        },
+      },
+    });
+  });
+  await page.route("**/api/admin/asaas/orders/sandbox-ui-order", (route) =>
+    route.fulfill({ json: { data: receipt("card") } }),
+  );
+  await page.route("https://sandbox.asaas.com/**", (route) =>
+    route.fulfill({ status: 200, contentType: "text/html", body: "<html><body><h1>Asaas Hosted Mock</h1></body></html>" }),
+  );
+
+  await page.goto("/admin/teste-pagamento");
+  await expect(page.getByRole("heading", { name: "1. Cliente e endereço de entrega" })).toBeVisible();
+  await page.locator("#checkout-zip").fill("12500000");
+  await page.locator("#checkout-address").fill("Rua do Teste");
+  await page.locator("#checkout-number").fill("10");
+  await page.locator("#checkout-city").fill("Guaratinguetá");
+  await page.locator("#checkout-state").selectOption("SP");
+
+  // Failed address persistence blocks payment call and preserves inputs
+  await page.getByRole("button", { name: "Pagar com cartão no Asaas Sandbox" }).click();
+  await expect(page.locator(".error-summary[role='alert']")).toContainText("Falha simulada ao salvar endereço.");
+  await expect(page.locator("#checkout-address")).toHaveValue("Rua do Teste");
+  expect(adminCheckoutCalls).toBe(0);
+
+  // Successful retry persists address and redirects immediately to hosted Asaas Sandbox
+  await page.getByRole("button", { name: "Pagar com cartão no Asaas Sandbox" }).click();
+  await expect(page).toHaveURL("https://sandbox.asaas.com/checkoutSession/show?id=checkout_admin_redirect");
+  expect(adminCheckoutCalls).toBe(1);
+
+  // Second purchase reloads /admin/teste-pagamento and reuses saved address without asking inputs
+  await page.goto("/admin/teste-pagamento");
+  await page.getByRole("button", { name: "Fazer nova compra de teste" }).click();
+  await expect(page.locator(".checkout-saved-addresses")).toContainText("Rua do Teste, 10");
+  await expect(page.locator("#checkout-address")).toHaveCount(0);
 });

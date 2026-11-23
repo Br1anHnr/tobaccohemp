@@ -1220,3 +1220,80 @@ table.admin-table {
     grid-template-columns: 1fr;
   }
 }
+
+/* Área restrita de teste Asaas Sandbox --------------------------------- */
+.admin-sandbox-layout {
+  display: grid;
+  gap: 20px;
+}
+
+.admin-sandbox-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+
+.admin-sandbox-main {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+
+.admin-sandbox-card {
+  padding: 22px;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.admin-sandbox-card h2 {
+  font-size: 20px;
+}
+
+.admin-sandbox-aside {
+  position: sticky;
+  top: 86px;
+}
+
+.admin-sandbox-fields {
+  display: grid;
+  gap: 18px;
+}
+
+.admin-sandbox-stock-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.admin-sandbox-stock-pill {
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: #dcd0b0;
+}
+
+.admin-sandbox-address-form,
+.admin-sandbox-guest {
+  display: grid;
+  gap: 14px;
+}
+
+@media (max-width: 1023px) {
+  .admin-sandbox-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-sandbox-aside {
+    position: static;
+  }
+}
+
+@media (max-width: 560px) {
+  .admin-sandbox-card .form-grid {
+    grid-template-columns: 1fr;
+  }
+}

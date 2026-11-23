@@ -195,7 +195,7 @@ export function RealOrderCard({ order }: { order: CustomerOrderDetail }) {
         <div className="account-gate-actions">
           {order.paymentProvider === "asaas" && (
             <Link
-              href={`/checkout?asaasOrder=${encodeURIComponent(order.id)}`}
+              href={order.detailPath ?? `/checkout?asaasOrder=${encodeURIComponent(order.id)}`}
               className="text-link"
             >
               Consultar no checkout

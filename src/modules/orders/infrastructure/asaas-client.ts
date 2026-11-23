@@ -1,10 +1,12 @@
 import { createHash, timingSafeEqual } from "node:crypto";
+import { hasIsolatedSandboxDatabase } from "@/shared/server/database";
 import { AdminError } from "@/shared/server/validation";
-import { customerAuthEnabled, previewOrigin } from "@/shared/server/preview";
+import { customerAuthEnabled, localAuthEnabled, previewOrigin, productionOrigin } from "@/shared/server/preview";
 import { ASAAS_SANDBOX } from "@/lib/constants";
 
 export const ASAAS_SANDBOX_BASE = ASAAS_SANDBOX.apiBase;
 export const ASAAS_SANDBOX_CHECKOUT = ASAAS_SANDBOX.checkoutBase;
+export const ASAAS_SANDBOX_CHECKOUT_ORIGIN = new URL(ASAAS_SANDBOX_CHECKOUT).origin;
 
 export class AsaasProviderError extends AdminError {
   constructor(
@@ -25,10 +27,51 @@ export function sandboxEnabled() {
     (!process.env.VERCEL || (previewOrigin() !== null && process.env.VERCEL_GIT_COMMIT_REF === "sandbox/asaas-preview"));
 }
 
-export function sandboxConfig() {
+/** Restricted admin-only Sandbox mode: permitted in Production ONLY when explicitly enabled with an isolated Neon DB. */
+export function adminSandboxEnabled() {
+  if (
+    process.env.ASAAS_SANDBOX_ENABLED !== "1" ||
+    process.env.ASAAS_SANDBOX_DATASET !== "synthetic"
+  ) {
+    return false;
+  }
+  if (!process.env.VERCEL) {
+    return localAuthEnabled();
+  }
+  if (
+    previewOrigin() !== null &&
+    process.env.VERCEL_GIT_COMMIT_REF === "sandbox/asaas-preview"
+  ) {
+    return true;
+  }
+  if (productionOrigin() !== null) {
+    return (
+      process.env.ADMIN_ENABLED === "1" &&
+      process.env.ASAAS_SANDBOX_ADMIN_ONLY === "1" &&
+      hasIsolatedSandboxDatabase()
+    );
+  }
+  return false;
+}
+
+export function isProductionAdminSandbox() {
+  return (
+    process.env.VERCEL === "1" &&
+    process.env.VERCEL_ENV === "production" &&
+    adminSandboxEnabled()
+  );
+}
+
+export function sandboxConfig(mode: "public" | "admin" | "any" = "any") {
   const key = process.env.ASAAS_SANDBOX_API_KEY ?? "";
   const token = process.env.ASAAS_SANDBOX_WEBHOOK_TOKEN ?? "";
-  if (!sandboxEnabled() || !key || token.length < 32 || token === key) {
+  const enabled =
+    mode === "public"
+      ? sandboxEnabled()
+      : mode === "admin"
+        ? adminSandboxEnabled()
+        : sandboxEnabled() || adminSandboxEnabled();
+  if (!enabled || !key || token.length < 32 || token === key) {
     throw new AdminError(503, "ASAAS_SANDBOX_NOT_CONFIGURED", "Asaas Sandbox não configurado.");
   }
   return { key, token, customer: process.env.ASAAS_SANDBOX_CUSTOMER_ID ?? "",

@@ -1,35 +1,33 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
-  ArrowRight,
   Check,
+  LoaderCircle,
   MapPin,
   Pencil,
   Plus,
+  RefreshCw,
+  ShieldAlert,
   UserCheck,
 } from "lucide-react";
 import { useCart } from "@/store/cart-store";
 import { useAccount } from "@/store/account-store";
 import { useCatalog } from "@/store/catalog-store";
-import { useOrder } from "@/store/order-store";
 import { formatPhone, formatZip, isValidPhone } from "@/lib/auth";
-import { BRAZIL_STATES, STORAGE } from "@/lib/constants";
+import { BRAZIL_STATES } from "@/lib/constants";
 import { currency } from "@/lib/currency";
 import {
   checkoutFields,
   contactFields,
   deliveryFields,
-  validateCheckoutValues,
-  createDemoOrder,
+  validateDeliveryValues,
   evaluateCartEligibility,
 } from "@/lib/checkout";
-import type { OrderPaymentMethod } from "@/shared/contracts/orders";
 import type { CustomerAddress, CustomerProfile } from "@/types/account";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { Button } from "@/components/ui/Button";
+import { Button, ButtonLink } from "@/components/ui/Button";
 import { CartSummary } from "./CartSummary";
 import { AsaasSandboxCheckout, type SandboxPaymentData } from "./AsaasSandboxCheckout";
 
@@ -73,12 +71,12 @@ export function CheckoutForm({
   const accountHydrated = useAccount((s) => s.hydrated);
   const sessionPending = useAccount((s) => s.sessionPending);
   const customer = useAccount((s) => s.customer);
+  const addressesLoading = useAccount((s) => s.addressesLoading);
+  const addressesError = useAccount((s) => s.addressesError);
+  const refreshAddresses = useAccount((s) => s.refreshAddresses);
   const saveAddress = useAccount((s) => s.saveAddress);
   const updateAddress = useAccount((s) => s.updateAddress);
   const products = useCatalog((s) => s.products);
-  const clear = useCart((s) => s.clear);
-  const setOrder = useOrder((s) => s.setOrder);
-  const router = useRouter();
 
   const [overrides, setOverrides] = useState<Partial<Record<CheckoutFieldKey, string>>>({});
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
@@ -87,18 +85,18 @@ export function CheckoutForm({
   const [editingContact, setEditingContact] = useState(false);
   const [addressLabel, setAddressLabel] = useState("");
   const [persistAddress, setPersistAddress] = useState(true);
-  const [demoConfirmed, setDemoConfirmed] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [eligibilityError, setEligibilityError] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [paymentMethod, setPaymentMethod] = useState<OrderPaymentMethod>("pix");
-  const lock = useRef(false);
+  const [addressSaveError, setAddressSaveError] = useState("");
+  const [addressSaveNotice, setAddressSaveNotice] = useState("");
+  const [savingAddress, setSavingAddress] = useState(false);
   const summary = useRef<HTMLDivElement>(null);
+  const alertRef = useRef<HTMLDivElement>(null);
 
   const [sandboxAvailable, setSandboxAvailable] = useState(initialSandboxAvailable);
   const [sandboxConfigReady, setSandboxConfigReady] = useState(initialSandboxAvailable);
   const [activeSandboxPayment, setActiveSandboxPayment] = useState<SandboxPaymentData | null>(null);
   const [sandboxResetNotice, setSandboxResetNotice] = useState("");
+
   const handleSandboxPaymentChange = useCallback((next: SandboxPaymentData | null) => {
     if (next) setSandboxResetNotice("");
     setActiveSandboxPayment(next);
@@ -114,6 +112,26 @@ export function CheckoutForm({
       .catch(() => {})
       .finally(() => setSandboxConfigReady(true));
   }, [initialSandboxAvailable]);
+
+  const syncedCustomerRef = useRef<string | null>(null);
+  const [addressSyncWarning, setAddressSyncWarning] = useState("");
+  useEffect(() => {
+    if (!accountHydrated || !customer) {
+      syncedCustomerRef.current = null;
+      return;
+    }
+    if (syncedCustomerRef.current === customer.email) return;
+    syncedCustomerRef.current = customer.email;
+    void refreshAddresses().then((result) => {
+      if (!result.ok && result.code !== "unavailable") {
+        setAddressSyncWarning(result.message);
+      } else {
+        setAddressSyncWarning("");
+      }
+    });
+  }, [accountHydrated, customer, refreshAddresses]);
+
+  const activeAddressesError = addressesError && !addressSyncWarning ? "" : addressSyncWarning;
 
   let hasAsaasLookup = false;
   if (cartHydrated && accountHydrated && typeof window !== "undefined") {
@@ -170,14 +188,16 @@ export function CheckoutForm({
       isValidPhone(customer.phone),
   );
   const showContactSummary = Boolean(
-    customer && hasSavedAddresses && customerHasValidContact && !editingContact,
+    customer && customerHasValidContact && !editingContact && (hasSavedAddresses || !sandboxAvailable),
   );
 
   const addressSource = addressMode === "new" ? null : activeSavedAddress;
   const fieldValue = (name: CheckoutFieldKey) =>
     overrides[name] ?? defaultFieldValue(customer, addressSource, name);
-  const setFieldValue = (name: CheckoutFieldKey, value: string) =>
+  const setFieldValue = (name: CheckoutFieldKey, value: string) => {
+    setAddressSaveError("");
     setOverrides((prev) => ({ ...prev, [name]: value }));
+  };
 
   const clearDeliveryOverrides = () =>
     setOverrides((prev) => {
@@ -196,6 +216,7 @@ export function CheckoutForm({
     setAddressModeOverride("saved");
     clearDeliveryOverrides();
     setErrors({});
+    setAddressSaveError("");
   };
 
   const openEditDelivery = () => {
@@ -203,6 +224,9 @@ export function CheckoutForm({
     setAddressModeOverride("edit");
     setAddressLabel(activeSavedAddress.label);
     setPersistAddress(true);
+    setAddressSaveError("");
+    setAddressSaveNotice("");
+    setErrors({});
     setOverrides((prev) => ({
       ...prev,
       zip: activeSavedAddress.zip,
@@ -218,25 +242,87 @@ export function CheckoutForm({
     setAddressModeOverride("new");
     setAddressLabel("");
     setPersistAddress(true);
+    setAddressSaveError("");
+    setAddressSaveNotice("");
+    setErrors({});
     setOverrides((prev) => ({
       ...prev,
       zip: "",
       address: "",
       number: "",
       complement: "",
-      city: "",
-      state: "",
+      city: customer?.city ?? "",
+      state: customer?.state ?? "",
     }));
+  };
+
+  const saveDeliveryToAccount = async (requirePersist: boolean): Promise<boolean> => {
+    setAddressSaveError("");
+    setAddressSaveNotice("");
+    const deliveryValues = {
+      zip: fieldValue("zip"),
+      address: fieldValue("address"),
+      number: fieldValue("number"),
+      complement: fieldValue("complement"),
+      city: fieldValue("city"),
+      state: fieldValue("state"),
+    };
+    const invalid = validateDeliveryValues(deliveryValues);
+    setErrors(invalid);
+    if (Object.keys(invalid).length) {
+      requestAnimationFrame(() => summary.current?.focus());
+      return false;
+    }
+
+    if (!customer) {
+      setAddressSaveError("Entre na sua conta para salvar o endereço de entrega.");
+      requestAnimationFrame(() => alertRef.current?.focus());
+      return false;
+    }
+
+    if (!persistAddress && !requirePersist) {
+      return true;
+    }
+
+    setSavingAddress(true);
+    try {
+      const payload = {
+        label: addressLabel.trim() || "Principal",
+        zip: deliveryValues.zip,
+        street: deliveryValues.address.trim(),
+        number: deliveryValues.number.trim(),
+        complement: deliveryValues.complement.trim(),
+        city: deliveryValues.city.trim(),
+        state: deliveryValues.state.trim().toUpperCase(),
+        isDefault: true,
+      };
+      const res =
+        addressMode === "edit" && activeSavedAddress
+          ? await updateAddress(activeSavedAddress.id, payload)
+          : await saveAddress(payload);
+      if (!res.ok) {
+        setAddressSaveError(res.message);
+        requestAnimationFrame(() => alertRef.current?.focus());
+        return false;
+      }
+      if (res.address?.id) {
+        setSelectedAddressId(res.address.id);
+      }
+      setAddressModeOverride("saved");
+      setSandboxAddressOpen(false);
+      clearDeliveryOverrides();
+      setAddressLabel("");
+      setAddressSaveNotice("Endereço salvo na sua conta para próximas compras.");
+      return true;
+    } finally {
+      setSavingAddress(false);
+    }
   };
 
   const renderField = (field: (typeof checkoutFields)[number]) => (
     <label
       key={field.name}
-      className={
-        ["address", "name"].includes(field.name)
-          ? "field-wide"
-          : ""
-      }
+      className={["address", "name"].includes(field.name) ? "field-wide" : ""}
       htmlFor={`checkout-${field.name}`}
     >
       {field.label}
@@ -251,9 +337,7 @@ export function CheckoutForm({
         onChange={(event) => setFieldValue(field.name, event.target.value)}
         maxLength={field.name === "phone" ? 20 : field.name === "zip" ? 9 : 160}
         aria-invalid={Boolean(errors[field.name])}
-        aria-describedby={
-          errors[field.name] ? `error-${field.name}` : undefined
-        }
+        aria-describedby={errors[field.name] ? `error-${field.name}` : undefined}
       />
       {errors[field.name] && (
         <small className="field-error" id={`error-${field.name}`}>
@@ -263,7 +347,7 @@ export function CheckoutForm({
     </label>
   );
 
-  const deliveryFieldsPanel = (
+  const deliveryFieldsPanel = (allowOptionalCheckbox: boolean) => (
     <>
       <div className="form-grid">
         {deliveryFields.map(renderField)}
@@ -306,7 +390,7 @@ export function CheckoutForm({
           </label>
         )}
       </div>
-      {customer && (
+      {customer && allowOptionalCheckbox && (
         <label className="checkbox-label checkout-save-address">
           <input
             id="checkout-save-address"
@@ -365,16 +449,20 @@ export function CheckoutForm({
           )}
         </div>
       ) : (
-        <p className="muted checkout-guest-hint">
-          Finalize como visitante ou{" "}
-          <Link href="/conta/entrar" className="text-link">
-            entre na sua conta
-          </Link>
-          .
-        </p>
+        <div className="checkout-guest-prompt">
+          <p className="muted checkout-guest-hint">
+            Entre na sua conta ou crie um cadastro para salvar seus endereços e acompanhar seus pedidos.
+          </p>
+          <div className="checkout-guest-actions">
+            <ButtonLink href="/conta/entrar?next=/checkout">Entrar na conta</ButtonLink>
+            <ButtonLink href="/conta/cadastro?next=/checkout" variant="secondary">
+              Criar conta
+            </ButtonLink>
+          </div>
+        </div>
       )}
 
-      {!showContactSummary && (
+      {customer && !showContactSummary && (
         <div className="form-grid">
           {contactFields.map(renderField)}
         </div>
@@ -438,6 +526,29 @@ export function CheckoutForm({
     </div>
   );
 
+  const addressAlertText = addressSaveError || activeAddressesError;
+  const addressAlertBox = addressAlertText && (
+    <div className="error-summary" role="alert" tabIndex={-1} ref={alertRef}>
+      <strong>
+        <AlertTriangle size={15} aria-hidden="true" /> Erro ao salvar ou carregar endereço
+      </strong>
+      <p>{addressAlertText}</p>
+      {customer && (
+        <button
+          type="button"
+          className="text-link checkout-inline-action"
+          onClick={() => {
+            setAddressSaveError("");
+            setAddressSyncWarning("");
+            void refreshAddresses();
+          }}
+        >
+          <RefreshCw size={13} aria-hidden="true" /> Tentar recarregar endereços
+        </button>
+      )}
+    </div>
+  );
+
   const summaryPanel = (
     <aside className="summary-panel">
       <h2>Resumo do pedido</h2>
@@ -493,7 +604,7 @@ export function CheckoutForm({
     </aside>
   );
 
-  // Unified Sandbox checkout (replaces redundant demo checkout when Preview Sandbox is active).
+  // Preview Sandbox checkout (enabled only on the sandbox/asaas-preview branch or local tests).
   if (sandboxAvailable) {
     const validateAndSaveSandboxDelivery = async (): Promise<boolean> => {
       const shouldValidateAddress =
@@ -503,49 +614,7 @@ export function CheckoutForm({
         setErrors({});
         return true;
       }
-      const values = {
-        name: fieldValue("name"),
-        email: fieldValue("email"),
-        phone: fieldValue("phone"),
-        zip: fieldValue("zip"),
-        address: fieldValue("address"),
-        number: fieldValue("number"),
-        complement: fieldValue("complement"),
-        city: fieldValue("city"),
-        state: fieldValue("state"),
-        demo: true,
-      };
-      const invalid = validateCheckoutValues(values);
-      setErrors(invalid);
-      if (Object.keys(invalid).length) {
-        requestAnimationFrame(() => summary.current?.focus());
-        return false;
-      }
-      if (customer && persistAddress) {
-        const payload = {
-          label: addressLabel.trim() || "Principal",
-          zip: values.zip,
-          street: values.address.trim(),
-          number: values.number.trim(),
-          complement: values.complement.trim(),
-          city: values.city.trim(),
-          state: values.state.trim().toUpperCase(),
-          isDefault: true,
-        };
-        const res =
-          addressMode === "edit" && activeSavedAddress
-            ? await updateAddress(activeSavedAddress.id, payload)
-            : await saveAddress(payload);
-        if (!res.ok) {
-          setEligibilityError(res.message);
-          return false;
-        }
-        setAddressModeOverride("saved");
-        setSandboxAddressOpen(false);
-        clearDeliveryOverrides();
-      }
-      setEligibilityError("");
-      return true;
+      return saveDeliveryToAccount(false);
     };
 
     const showPreOrderSections = customer && items.length > 0 && !activeSandboxPayment && !hasAsaasLookup;
@@ -558,15 +627,13 @@ export function CheckoutForm({
             <p>Ambiente de homologação — cobranças reais estão desabilitadas neste Preview.</p>
           </div>
 
-          {eligibilityError && (
-            <div className="error-summary" role="alert">
-              <strong>
-                <AlertTriangle size={15} aria-hidden="true" /> Não foi possível continuar
-              </strong>
-              <p>{eligibilityError}</p>
+          {addressAlertBox}
+          {addressSaveNotice && (
+            <div className="checkout-test-note" role="status">
+              <Check size={15} aria-hidden="true" />
+              <p>{addressSaveNotice}</p>
             </div>
           )}
-
           {errorSummaryBox}
 
           {showPreOrderSections && (
@@ -631,7 +698,7 @@ export function CheckoutForm({
                 {hasSavedAddresses && addressMode === "saved"
                   ? savedAddressesRadiogroup
                   : (hasSavedAddresses || sandboxAddressOpen)
-                    ? deliveryFieldsPanel
+                    ? deliveryFieldsPanel(true)
                     : <p className="muted">Entrega a combinar. Você pode adicionar um endereço acima ou seguir direto para o pagamento.</p>}
               </fieldset>
             </>
@@ -648,123 +715,27 @@ export function CheckoutForm({
     );
   }
 
-  // Fallback non-billing checkout when payment gateway is disabled (static/production-safe mode).
+  // Honest commercial storefront checkout on Production (`main`): real billing is not active yet;
+  // zero fake demo orders or misleading "Pedido recebido" screens, while preserving real address reuse.
   return (
     <div className="commerce-columns checkout-columns">
-      <form
-        noValidate
-        onSubmit={async (event) => {
-          event.preventDefault();
-          if (lock.current) return;
-          if (!eligibility.allowed) {
-            setEligibilityError(
-              eligibility.blockedReasons[0] ??
-                "Há itens não elegíveis para pedido online.",
-            );
-            return;
-          }
-
-          const values = {
-            name: fieldValue("name"),
-            email: fieldValue("email"),
-            phone: fieldValue("phone"),
-            zip: fieldValue("zip"),
-            address: fieldValue("address"),
-            number: fieldValue("number"),
-            complement: fieldValue("complement"),
-            city: fieldValue("city"),
-            state: fieldValue("state"),
-            demo: demoConfirmed,
-          };
-
-          const invalid = validateCheckoutValues(values);
-          setErrors(invalid);
-          if (Object.keys(invalid).length) {
-            if (
-              showContactSummary &&
-              (invalid.name || invalid.email || invalid.phone)
-            ) {
-              setEditingContact(true);
-            }
-            if (
-              addressMode === "saved" &&
-              (invalid.zip ||
-                invalid.address ||
-                invalid.number ||
-                invalid.city ||
-                invalid.state)
-            ) {
-              openEditDelivery();
-            }
-            requestAnimationFrame(() => summary.current?.focus());
-            return;
-          }
-
-          lock.current = true;
-          setSubmitting(true);
-          try {
-            if (customer && persistAddress && addressMode !== "saved") {
-              const payload = {
-                label: addressLabel.trim() || "Principal",
-                zip: values.zip,
-                street: values.address.trim(),
-                number: values.number.trim(),
-                complement: values.complement.trim(),
-                city: values.city.trim(),
-                state: values.state.trim().toUpperCase(),
-                isDefault: true,
-              };
-              const res =
-                addressMode === "edit" && activeSavedAddress
-                  ? await updateAddress(activeSavedAddress.id, payload)
-                  : await saveAddress(payload);
-              if (!res.ok && res.code === "invalid") {
-                lock.current = false;
-                setSubmitting(false);
-                setEligibilityError(res.message);
-                return;
-              }
-            }
-
-            const order = createDemoOrder(items, {
-              channel: "site",
-              paymentMethod,
-              products,
-            });
-            setOrder(order);
-            try {
-              sessionStorage.setItem(STORAGE.order, JSON.stringify(order));
-            } catch {
-              /* In-memory receipt remains available. */
-            }
-            clear();
-            router.push("/pedido-confirmado");
-          } catch (cause) {
-            lock.current = false;
-            setSubmitting(false);
-            setEligibilityError(
-              cause instanceof Error
-                ? cause.message
-                : "Não foi possível registrar o pedido.",
-            );
-          }
-        }}
-      >
-        <div className="checkout-test-note" role="note">
-          <Check size={15} aria-hidden="true" />
-          <p>Ambiente de homologação — cobranças reais estão desabilitadas.</p>
-        </div>
-
-        {(!eligibility.allowed || eligibilityError) && (
+      <div>
+        {!eligibility.allowed && (
           <div className="error-summary" role="alert">
             <strong>
-              <AlertTriangle size={15} aria-hidden="true" /> Não foi possível
-              continuar
+              <AlertTriangle size={15} aria-hidden="true" /> Itens não elegíveis
             </strong>
-            <p>{eligibilityError || eligibility.blockedReasons[0]}</p>
+            <p>{eligibility.blockedReasons[0]}</p>
           </div>
         )}
 
+        {addressAlertBox}
+        {addressSaveNotice && (
+          <div className="checkout-test-note" role="status">
+            <Check size={15} aria-hidden="true" />
+            <p>{addressSaveNotice}</p>
+          </div>
+        )}
         {errorSummaryBox}
 
         {customerSection}
@@ -772,7 +743,7 @@ export function CheckoutForm({
         <fieldset className="checkout-section">
           <div className="checkout-section-head">
             <legend>2. Entrega</legend>
-            {hasSavedAddresses && addressMode === "saved" && (
+            {customer && hasSavedAddresses && addressMode === "saved" && (
               <div className="checkout-section-actions">
                 <button
                   type="button"
@@ -790,13 +761,15 @@ export function CheckoutForm({
                 </button>
               </div>
             )}
-            {hasSavedAddresses && addressMode !== "saved" && (
+            {customer && hasSavedAddresses && addressMode !== "saved" && (
               <button
                 type="button"
                 className="text-link checkout-inline-action"
                 onClick={() => {
                   setAddressModeOverride("saved");
                   clearDeliveryOverrides();
+                  setErrors({});
+                  setAddressSaveError("");
                 }}
               >
                 Usar endereço salvo
@@ -804,72 +777,79 @@ export function CheckoutForm({
             )}
           </div>
 
-          {hasSavedAddresses && addressMode === "saved"
-            ? savedAddressesRadiogroup
-            : deliveryFieldsPanel}
+          {!customer ? (
+            <p className="muted">
+              Entre na sua conta acima para cadastrar seu endereço de entrega e reaproveitá-lo automaticamente nas próximas compras.
+            </p>
+          ) : addressesLoading && !savedAddresses.length ? (
+            <p role="status" className="muted">
+              Carregando endereços salvos…
+            </p>
+          ) : hasSavedAddresses && addressMode === "saved" ? (
+            savedAddressesRadiogroup
+          ) : (
+            <>
+              {deliveryFieldsPanel(false)}
+              <div className="checkout-actions-row">
+                <Button
+                  type="button"
+                  disabled={savingAddress}
+                  onClick={() => {
+                    void saveDeliveryToAccount(true);
+                  }}
+                >
+                  {savingAddress && <LoaderCircle size={15} className="spin" aria-hidden="true" />}
+                  {savingAddress
+                    ? "Salvando endereço…"
+                    : addressMode === "edit"
+                      ? "Atualizar endereço na conta"
+                      : "Salvar endereço na conta"}
+                </Button>
+                {hasSavedAddresses && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={savingAddress}
+                    onClick={() => {
+                      setAddressModeOverride("saved");
+                      clearDeliveryOverrides();
+                      setErrors({});
+                      setAddressSaveError("");
+                    }}
+                  >
+                    Cancelar
+                  </Button>
+                )}
+              </div>
+            </>
+          )}
         </fieldset>
 
         <fieldset className="checkout-section checkout-payment-section">
-          <legend>3. Forma de pagamento</legend>
-          <div className="checkout-choice-grid">
-            <label className="checkout-choice" htmlFor="method-pix">
-              <input
-                id="method-pix"
-                type="radio"
-                name="paymentMethod"
-                value="pix"
-                checked={paymentMethod === "pix"}
-                onChange={() => setPaymentMethod("pix")}
-              />
-              <span>
-                <strong>Pix</strong>
-                <small>Sem cobrança real neste ambiente.</small>
-              </span>
-            </label>
-            <label className="checkout-choice" htmlFor="method-card">
-              <input
-                id="method-card"
-                type="radio"
-                name="paymentMethod"
-                value="card"
-                checked={paymentMethod === "card"}
-                onChange={() => setPaymentMethod("card")}
-              />
-              <span>
-                <strong>Cartão de crédito</strong>
-                <small>Nenhum dado de cartão é solicitado neste site.</small>
-              </span>
-            </label>
+          <legend>3. Pagamento</legend>
+          <div className="checkout-test-note" role="status">
+            <ShieldAlert size={16} aria-hidden="true" />
+            <div>
+              <p>
+                <strong>Pagamentos online indisponíveis para pedidos comerciais.</strong>
+              </p>
+              <p className="muted">
+                As cobranças via Pix e Cartão de crédito não estão ativas na loja pública e nenhum pedido é confirmado sem aprovação do provedor de pagamento.
+              </p>
+            </div>
+          </div>
+          <div className="checkout-actions-row">
+            <ButtonLink href="/loja" variant="secondary">
+              Continuar explorando a loja
+            </ButtonLink>
+            {customer && (
+              <ButtonLink href="/conta/pedidos" variant="ghost">
+                Ver meus pedidos
+              </ButtonLink>
+            )}
           </div>
         </fieldset>
-
-        <label className="checkbox-label demo-checkbox">
-          <input
-            id="checkout-demo"
-            type="checkbox"
-            name="demo"
-            required
-            checked={demoConfirmed}
-            onChange={(event) => setDemoConfirmed(event.target.checked)}
-            aria-invalid={Boolean(errors.demo)}
-            aria-describedby={errors.demo ? "error-demo" : undefined}
-          />{" "}
-          Entendo que este pedido é apenas uma demonstração.
-        </label>
-        {errors.demo && (
-          <p className="field-error" id="error-demo">
-            {errors.demo}
-          </p>
-        )}
-        <Button
-          type="submit"
-          disabled={submitting || !eligibility.allowed}
-          className="checkout-submit"
-        >
-          {submitting ? "Finalizando…" : "Finalizar pedido"}
-          <ArrowRight size={18} />
-        </Button>
-      </form>
+      </div>
       {summaryPanel}
     </div>
   );

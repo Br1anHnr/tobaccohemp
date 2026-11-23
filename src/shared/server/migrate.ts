@@ -1,4 +1,5 @@
-import { pool } from "./database";
+import type { Pool } from "pg";
+import { pool, sandboxPool } from "./database";
 import { seedCatalog, LOW_STOCK_AT } from "./seed";
 import { bootstrapAdminAccount } from "@/modules/auth";
 
@@ -291,18 +292,31 @@ migrations.push(
 );
 
 let running: Promise<void> | undefined;
+let runningSandbox: Promise<void> | undefined;
 
 /** Apply pending migrations and seed the catalog exactly once per process. */
 export function ensureSchema(): Promise<void> {
-  running ??= run().catch(error => {
+  running ??= run(pool()).catch(error => {
     running = undefined;
     throw error;
   });
   return running;
 }
 
-async function readAppliedMigrations(): Promise<Set<string>> {
-  const db = pool();
+/** Apply pending migrations and seed the isolated Asaas Sandbox database once per process. */
+export function ensureSandboxSchema(): Promise<void> {
+  const target = sandboxPool();
+  if (target === pool()) {
+    return ensureSchema();
+  }
+  runningSandbox ??= run(target).catch(error => {
+    runningSandbox = undefined;
+    throw error;
+  });
+  return runningSandbox;
+}
+
+async function readAppliedMigrations(db: Pool): Promise<Set<string>> {
   try {
     const applied = await db.query("SELECT id FROM schema_migrations");
     return new Set(applied.rows.map(row => String(row.id)));
@@ -319,14 +333,13 @@ async function readAppliedMigrations(): Promise<Set<string>> {
   }
 }
 
-async function run(): Promise<void> {
-  const db = pool();
-  const done = await readAppliedMigrations();
+async function run(db: Pool): Promise<void> {
+  const done = await readAppliedMigrations(db);
   let appliedAny = false;
 
   for (const migration of migrations) {
     if (done.has(migration.id)) continue;
-    const client = await pool().connect();
+    const client = await db.connect();
     try {
       await client.query("BEGIN");
       await client.query(migration.sql);

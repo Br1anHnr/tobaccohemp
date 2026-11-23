@@ -11,6 +11,9 @@ import type { OrderStatus, OrderStockStatus } from "@/shared/contracts/orders";
 import type { sandboxDashboard } from "@/modules/orders/infrastructure/asaas-sandbox";
 
 type Dashboard = Awaited<ReturnType<typeof sandboxDashboard>>;
+type DashboardView = Omit<Dashboard, "products"> & {
+  products?: Dashboard["products"];
+};
 const attemptLabel: Record<string, string> = {
   prepared: "Preparando",
   creating: "Registrando tentativa",
@@ -24,7 +27,7 @@ const dateTimeFormat = new Intl.DateTimeFormat("pt-BR", {
 });
 
 export function AsaasSandboxDashboard() {
-  const [data, setData] = useState<Dashboard | null>(null);
+  const [data, setData] = useState<DashboardView | null>(null);
   const [role, setRole] = useState<AdminRole | null>(null);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -94,7 +97,14 @@ export function AsaasSandboxDashboard() {
 
   return (
     <div className="asaas-dashboard">
-      <div><Button onClick={refresh} variant="secondary">Atualizar painel Sandbox</Button></div>
+      <div className="order-actions-row">
+        {role === "admin" && (
+          <Link className="button button-primary" href="/admin/teste-pagamento">
+            Abrir área de teste de pagamento
+          </Link>
+        )}
+        <Button onClick={refresh} variant="secondary">Atualizar painel Sandbox</Button>
+      </div>
       {error && <p role="alert">{error}</p>}
       {data && (
         <>
@@ -111,6 +121,35 @@ export function AsaasSandboxDashboard() {
               />
             ))}
           </div>
+          {data.products && data.products.length > 0 && (
+            <>
+              <h2>Estoque isolado (Sandbox)</h2>
+              <div className="table-card">
+                <div className="table-wrap">
+                  <table className="admin-table">
+                    <thead>
+                      <tr>
+                        <th>Produto</th>
+                        <th>SKU</th>
+                        <th className="num">Preço</th>
+                        <th className="num">Estoque</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.products.map((prod) => (
+                        <tr key={prod.id}>
+                          <td className="primary">{prod.name}</td>
+                          <td className="secondary">{prod.sku}</td>
+                          <td className="num">{currency(prod.price_cents / 100)}</td>
+                          <td className="num">{prod.stock}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
+          )}
           <h2>Pedidos e estoque de teste</h2>
           {!data.attempts.length && <p>Nenhum pedido Sandbox registrado.</p>}
           {data.attempts.map(row => {
@@ -143,8 +182,8 @@ export function AsaasSandboxDashboard() {
                     )}
                   </div>
                 )}
-                <Link className="text-link" href={`/checkout?asaasOrder=${encodeURIComponent(row.id)}`}>
-                  Consultar com a sessão do comprador
+                <Link className="text-link" href={`/admin/teste-pagamento?asaasOrder=${encodeURIComponent(row.id)}`}>
+                  Abrir na área de teste
                 </Link>
               </section>
             );

@@ -37,6 +37,7 @@ export interface OrderHistoryFeedEntry extends OrderStatusHistoryEntry {
 export interface CustomerOrderDetail extends OrderDetail {
   attemptState?: string | null;
   lastProviderStatus?: string | null;
+  detailPath?: string;
 }
 
 function isPoolClient(db: Db): db is PoolClient {

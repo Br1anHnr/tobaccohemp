@@ -1,12 +1,12 @@
 import { test, expect } from "@playwright/test";
 import { NextRequest } from "next/server";
 import { execFileSync } from "node:child_process";
-import { pool } from "../../src/shared/server/database";
+import { pool, hasIsolatedSandboxDatabase } from "../../src/shared/server/database";
 import { ensureSchema, migrations } from "../../src/shared/server/migrate";
 import { signUpCustomer, customerSessionCookie } from "../../src/modules/auth";
 import { createOrder, getOrderDetail, expireOverdueOrders, transitionOrderStatus, listOrderHistory, listCustomerOrders } from "../../src/modules/orders";
 import { createSandboxPayment, processAsaasEvent, sandboxPaymentView, sandboxDashboard, adminCancelSandboxAttempt } from "../../src/modules/orders/infrastructure/asaas-sandbox";
-import { AsaasClient, ASAAS_SANDBOX_BASE, sandboxEnabled } from "../../src/modules/orders/infrastructure/asaas-client";
+import { AsaasClient, ASAAS_SANDBOX_BASE, adminSandboxEnabled, sandboxEnabled } from "../../src/modules/orders/infrastructure/asaas-client";
 import { customerAuthEnabled } from "../../src/shared/server/preview";
 import { POST as webhook } from "../../src/app/api/webhooks/asaas/route";
 import { POST as checkout } from "../../src/app/api/checkout/asaas/route";
@@ -248,7 +248,7 @@ test("demo orders and expiry sweep remain isolated, manual Asaas transitions for
   const dashboard = await sandboxDashboard(); expect(dashboard.environment).toBe("sandbox"); expect(dashboard.attempts.some(r => r.id===demo.id)).toBe(false);
 });
 
-test("only explicit Sandbox preview branch is permitted and production enables auth without sandbox", () => {
+test("only explicit Sandbox preview branch is permitted and production enables auth without public sandbox", () => {
   const saved = {...process.env};
   try {
     process.env.VERCEL="1";process.env.VERCEL_ENV="preview";process.env.PREVIEW_BACKEND_ENABLED="1";process.env.APP_ORIGIN="https://sandbox.example.test";
@@ -258,7 +258,42 @@ test("only explicit Sandbox preview branch is permitted and production enables a
     process.env.VERCEL_ENV="production";process.env.APP_BACKEND_ENABLED="1";process.env.APP_ORIGIN="https://tobaccohemp.vercel.app";
     expect(sandboxEnabled()).toBe(false);
     expect(customerAuthEnabled()).toBe(true);
+    expect(adminSandboxEnabled()).toBe(false);
+
+    // Same DB or pooler-vs-direct alias must NEVER pass isolation
+    process.env.DATABASE_URL = "postgresql://u:p@ep-abc-pooler.sa-east-1.aws.neon.tech/neondb?sslmode=require";
+    process.env.ASAAS_SANDBOX_DATABASE_URL = "postgresql://u:p@ep-abc.sa-east-1.aws.neon.tech/neondb";
+    expect(hasIsolatedSandboxDatabase()).toBe(false);
+    process.env.ADMIN_ENABLED = "1";
+    process.env.ASAAS_SANDBOX_ADMIN_ONLY = "1";
+    expect(adminSandboxEnabled()).toBe(false);
+    expect(sandboxEnabled()).toBe(false);
+
+    // Distinct isolated DB unlocks admin-only Sandbox in production while public checkout remains disabled
+    process.env.ASAAS_SANDBOX_DATABASE_URL = "postgresql://u:p@ep-abc-pooler.sa-east-1.aws.neon.tech/th_asaas_isolated";
+    expect(hasIsolatedSandboxDatabase()).toBe(true);
+    expect(adminSandboxEnabled()).toBe(true);
+    expect(sandboxEnabled()).toBe(false);
   } finally { process.env = saved; }
+});
+
+test("admin callback path and external actor shadow creation isolate Sandbox runs cleanly", async () => {
+  const externalAccountId = "external-prod-account-001";
+  const created = await createSandboxPayment(
+    input("admin-callback", "card"),
+    externalAccountId,
+    origin,
+    client,
+    { callbackPath: "/admin/teste-pagamento", requireAdminMode: true },
+  );
+  expect(created.order.customerAccountId).toBe(externalAccountId);
+  expect(created.order.checkoutUrl).toContain("https://sandbox.asaas.com/checkoutSession/show?id=");
+  const checkoutReq = requests.findLast((r) => r.url.endsWith("/checkouts"));
+  const sentBody = JSON.parse(String(checkoutReq?.init?.body));
+  expect(sentBody.callback.successUrl).toBe(`${origin}/admin/teste-pagamento?asaasOrder=${encodeURIComponent(created.order.id)}`);
+  const dash = await sandboxDashboard();
+  expect(Array.isArray(dash.products)).toBe(true);
+  expect(dash.products.some((p) => p.id === "sandbox-accessory")).toBe(true);
 });
 
 test("PAYMENT_OVERDUE expires Pix order and releases stock once; late payment reacquires", async () => {

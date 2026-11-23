@@ -257,7 +257,7 @@ test("cart quantities, variants, stock ceiling, persistence and removal", async 
   ).toBeVisible();
 });
 
-test("checkout validates, confirms demo order and clears persisted cart", async ({
+test("checkout shows honest payment-disabled state without creating fake demo orders", async ({
   page,
 }) => {
   await enter(page, "/produto/case-compact-preto");
@@ -268,96 +268,36 @@ test("checkout validates, confirms demo order and clears persisted cart", async 
     .getByRole("dialog")
     .getByRole("link", { name: "Finalizar pedido" })
     .click();
-  await page
-    .getByRole("button", { name: "Finalizar pedido", exact: true })
-    .click();
-  await expect(page.locator(".error-summary")).toBeVisible();
-  await expect(page.locator(".error-summary")).toBeFocused();
-  const values: Record<string, string> = {
-    name: "Cliente Demonstração",
-    email: "demo@example.com",
-    phone: "11999999999",
-    zip: "01001000",
-    address: "Rua Exemplo",
-    number: "100",
-    city: "São Paulo",
-  };
-  for (const [key, value] of Object.entries(values))
-    await page.locator(`#checkout-${key}`).fill(value);
-  await page.getByLabel("Estado", { exact: true }).selectOption("SP");
-  await page
-    .getByLabel("Entendo que este pedido é apenas uma demonstração.")
-    .check();
-  await page
-    .getByRole("button", { name: "Finalizar pedido", exact: true })
-    .click();
-  await expect(page).toHaveURL(/pedido-confirmado/);
-  await expect(
-    page.getByRole("heading", { name: "PEDIDO RECEBIDO." }),
-  ).toBeVisible();
-  await expect(page.locator(".confirmation")).toContainText(/TH-[A-F0-9]{8}/);
-  await page.reload();
-  await expect(
-    page.getByRole("heading", { name: "PEDIDO RECEBIDO." }),
-  ).toBeVisible();
-  expect(
-    await page.evaluate(() => sessionStorage.getItem("th-demo-order")),
-  ).not.toContain("demo@example.com");
-  await page.goto("/carrinho");
-  await expect(
-    page.getByRole("heading", {
-      name: "Seu carrinho está esperando por você.",
-    }),
-  ).toBeVisible();
-});
-
-test("checkout supports payment method selection without collecting card data or storing PII", async ({
-  page,
-}) => {
-  await enter(page, "/produto/case-compact-preto");
-  await page
-    .getByRole("button", { name: "Adicionar Case Compact Preto ao carrinho" })
-    .click();
-  await page
-    .getByRole("dialog")
-    .getByRole("link", { name: "Finalizar pedido" })
-    .click();
+  await expect(page).toHaveURL(/\/checkout$/);
 
   await expect(page.locator("input[name='cardNumber']")).toHaveCount(0);
-  await expect(page.locator("#channel-whatsapp")).toHaveCount(0);
-  await page.locator("#method-pix").check();
+  await expect(page.locator('input[autocomplete="cc-number"]')).toHaveCount(0);
+  await expect(page.locator("#checkout-demo")).toHaveCount(0);
+  await expect(
+    page.getByText("Pagamentos online indisponíveis para pedidos comerciais."),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Entrar na conta" }),
+  ).toBeVisible();
 
-  const values: Record<string, string> = {
-    name: "Cliente Simulação",
-    email: "privado@example.com",
-    phone: "11988887777",
-    zip: "01001000",
-    address: "Rua Teste",
-    number: "42",
-    city: "São Paulo",
-  };
-  for (const [key, value] of Object.entries(values))
-    await page.locator(`#checkout-${key}`).fill(value);
-  await page.getByLabel("Estado", { exact: true }).selectOption("SP");
-  await page
-    .getByLabel("Entendo que este pedido é apenas uma demonstração.")
-    .check();
-  await page
-    .getByRole("button", { name: "Finalizar pedido", exact: true })
-    .click();
-
-  await expect(page).toHaveURL(/pedido-confirmado/);
-  await expect(page.locator(".confirmation")).not.toContainText("(desacoplado)");
-  await expect(page.locator(".demo-pix-code")).toContainText("SEM-VALOR-FINANCEIRO");
-
-  await page.locator(".confirmation-details summary").click();
-  await expect(page.locator(".confirmation-items")).toContainText("Case Compact Preto");
-  await expect(page.locator(".confirmation-history")).toContainText("Aguardando pagamento");
-
-  const stored = await page.evaluate(() => sessionStorage.getItem("th-demo-order") ?? "");
-  expect(stored).not.toContain("privado@example.com");
-  expect(stored).not.toContain("Cliente Simulação");
-  expect(stored).not.toContain("11988887777");
+  await page.evaluate(() => {
+    sessionStorage.setItem(
+      "th-demo-order",
+      JSON.stringify({ number: "TH-DEADBEEF", total: 49.9, count: 1 }),
+    );
+  });
+  await page.goto("/pedido-confirmado");
+  await expect(
+    page.getByRole("heading", { name: "ACOMPANHAMENTO NA SUA CONTA." }),
+  ).toBeVisible();
+  await expect(page.getByText("PEDIDO RECEBIDO.")).toHaveCount(0);
+  expect(
+    await page.evaluate(() => sessionStorage.getItem("th-demo-order")),
+  ).toBeNull();
+  await page.goto("/carrinho");
+  await expect(
+    page.getByText("Case Compact Preto").first(),
+  ).toBeVisible();
 });
 
 test("basic accessibility for age gate, home, search and checkout", async ({

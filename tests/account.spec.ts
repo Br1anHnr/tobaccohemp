@@ -92,11 +92,41 @@ test("sign-up creates an account and opens the customer area", async ({ page }) 
   await expect(page.locator(".account-hello")).toContainText("Maria");
 });
 
-test("signed-in customer reuses account data in demo checkout without re-registering", async ({
+test("signed-in customer saves address in checkout, surfaces errors cleanly and reuses it without retyping", async ({
   page,
 }, testInfo) => {
-  await page.route("**/api/auth/session", signedOutSession);
-  await page.route("**/api/auth/addresses", (route) => {
+  const savedAddresses: Array<Record<string, unknown>> = [];
+  let failNextSave = true;
+
+  await page.route("**/api/auth/session", (route) =>
+    route.fulfill({
+      json: {
+        data: savedAddresses.length
+          ? {
+              id: "e2e-checkout",
+              name: "Marina Checkout",
+              email: "marina.demo@example.test",
+              phone: "11988887777",
+              city: "São Paulo",
+              state: "SP",
+              addresses: savedAddresses,
+              createdAt: "2026-01-01T00:00:00.000Z",
+            }
+          : null,
+      },
+    }),
+  );
+  await page.route("**/api/auth/addresses", async (route) => {
+    if (route.request().method() === "GET") {
+      return route.fulfill({ json: { data: savedAddresses } });
+    }
+    if (failNextSave) {
+      failNextSave = false;
+      return route.fulfill({
+        status: 500,
+        json: { error: { code: "INTERNAL_ERROR", message: "Erro simulado ao gravar endereço no Neon." } },
+      });
+    }
     const body = route.request().postDataJSON();
     const saved = {
       id: "addr-1",
@@ -110,7 +140,8 @@ test("signed-in customer reuses account data in demo checkout without re-registe
       isDefault: true,
       updatedAt: "2026-01-01T00:00:00.000Z",
     };
-    return route.fulfill({ status: 201, json: { data: { address: saved, addresses: [saved] } } });
+    savedAddresses.splice(0, savedAddresses.length, saved);
+    return route.fulfill({ status: 201, json: { data: { address: saved, addresses: savedAddresses } } });
   });
   await page.route("**/api/auth/signup", (route) => {
     const body = route.request().postDataJSON();
@@ -171,11 +202,6 @@ test("signed-in customer reuses account data in demo checkout without re-registe
 
   await expect(page.locator(".checkout-account-banner")).toContainText("Marina Checkout");
   await expect(page.locator(".checkout-account-banner")).toContainText("marina.demo@example.test");
-  await expect(page.locator("#checkout-name")).toHaveValue("Marina Checkout");
-  await expect(page.locator("#checkout-email")).toHaveValue("marina.demo@example.test");
-  await expect(page.locator("#checkout-phone")).toHaveValue("11988887777");
-  await expect(page.locator("#checkout-city")).toHaveValue("São Paulo");
-  await expect(page.locator("#checkout-state")).toHaveValue("SP");
 
   const axe = await new AxeBuilder({ page })
     .withTags(["wcag2a", "wcag2aa", "wcag21aa"])
@@ -185,16 +211,29 @@ test("signed-in customer reuses account data in demo checkout without re-registe
   await page.locator("#checkout-zip").fill("01001000");
   await page.locator("#checkout-address").fill("Rua Ficticia");
   await page.locator("#checkout-number").fill("42");
-  await page
-    .getByLabel("Entendo que este pedido é apenas uma demonstração.")
-    .check();
-  await page
-    .getByRole("button", { name: "Finalizar pedido", exact: true })
-    .click();
-  await expect(page).toHaveURL(/pedido-confirmado/);
-  await expect(
-    page.getByRole("heading", { name: "PEDIDO RECEBIDO." }),
-  ).toBeVisible();
+  await page.locator("#checkout-city").fill("São Paulo");
+  await page.locator("#checkout-state").selectOption("SP");
+
+  // First save fails with 500 -> error is shown and form values remain intact
+  await page.getByRole("button", { name: "Salvar endereço na conta" }).click();
+  await expect(page.locator(".error-summary[role='alert']")).toContainText("Erro simulado ao gravar endereço no Neon.");
+  await expect(page.locator("#checkout-address")).toHaveValue("Rua Ficticia");
+
+  // Retry save succeeds -> switches immediately to compact saved address
+  await page.getByRole("button", { name: "Salvar endereço na conta" }).click();
+  await expect(page.locator(".checkout-saved-addresses")).toContainText("Rua Ficticia, 42");
+  await expect(page.locator("#checkout-address")).toHaveCount(0);
+
+  // Revisit /checkout via storefront navigation -> saved address is reused without prompting again
+  await page.getByRole("link", { name: "Continuar explorando a loja" }).click();
+  await expect(page).toHaveURL(/\/loja$/);
+  await page.getByRole("button", { name: /Abrir carrinho/ }).click();
+  await page.getByRole("dialog").getByRole("link", { name: /Finalizar pedido/ }).click();
+  await expect(page).toHaveURL(/\/checkout$/);
+  await expect(page.locator(".checkout-saved-addresses")).toContainText("Rua Ficticia, 42");
+  await expect(page.locator("#checkout-address")).toHaveCount(0);
+  await expect(page.getByText("Pagamentos online indisponíveis para pedidos comerciais.")).toBeVisible();
+  await expect(page.getByText("PEDIDO RECEBIDO.")).toHaveCount(0);
 
   const stored = await page.evaluate(() =>
     JSON.stringify({ ...localStorage, ...sessionStorage }),

@@ -14,10 +14,14 @@ export function AdminSessionGate({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (path === "/admin/login") return;
     let cancelled = false;
+    const fullPath =
+      typeof window !== "undefined" && window.location.pathname === path && window.location.search
+        ? `${path}${window.location.search}`
+        : path;
     const expired = () => {
       if (cancelled) return;
       setChecked({ path, state: "login" });
-      router.replace(`/admin/login?next=${encodeURIComponent(path)}`);
+      router.replace(`/admin/login?next=${encodeURIComponent(fullPath)}`);
     };
     window.addEventListener(sessionExpiredEvent, expired);
     fetchAdminSession().then(user => {

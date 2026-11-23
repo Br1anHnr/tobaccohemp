@@ -4,8 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   ArrowLeft,
+  CreditCard,
   LayoutDashboard,
   Package,
+  ShieldCheck,
   ShoppingCart,
   Tags,
   Users,
@@ -57,7 +59,27 @@ export function AdminSidebar({
 
         <p className="admin-nav__group">Comercial</p>
         {sandboxEnabled && (
-          <Link href="/admin/asaas" className="admin-nav__link" onClick={onClose} aria-current={pathname === "/admin/asaas" ? "page" : undefined}>Asaas Sandbox</Link>
+          <>
+            <Link
+              href="/admin/teste-pagamento"
+              className="admin-nav__link"
+              onClick={onClose}
+              aria-current={pathname === "/admin/teste-pagamento" ? "page" : undefined}
+            >
+              <CreditCard size={18} aria-hidden="true" />
+              Teste de pagamento
+              <span className="admin-nav__badge">Sandbox</span>
+            </Link>
+            <Link
+              href="/admin/asaas"
+              className="admin-nav__link"
+              onClick={onClose}
+              aria-current={pathname === "/admin/asaas" ? "page" : undefined}
+            >
+              <ShieldCheck size={18} aria-hidden="true" />
+              Asaas Sandbox
+            </Link>
+          </>
         )}
         <Link
           href="/admin/pedidos"

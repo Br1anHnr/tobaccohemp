@@ -27,6 +27,7 @@ export interface AuthClient {
   requestPasswordReset(email: string): Promise<AuthResult>;
   resetPassword(token: string, password: string): Promise<AuthResult>;
   updateProfile(profile: CustomerProfile): Promise<AuthResult>;
+  fetchAddresses(): Promise<AuthResult>;
   saveAddress(input: CustomerAddressInput): Promise<AuthResult>;
   updateAddress(id: string, input: CustomerAddressInput): Promise<AuthResult>;
   deleteAddress(id: string): Promise<AuthResult>;
@@ -42,7 +43,7 @@ const toProfile = (account: CustomerAccount): CustomerProfile => ({
   addresses: account.addresses ?? [],
 });
 
-type AuthErrorCode = "invalid" | "network" | "unavailable" | "rate_limit";
+export type AuthErrorCode = "invalid" | "unauthorized" | "network" | "unavailable" | "rate_limit" | "server";
 type CallResult = { data: unknown } | { error: { code: AuthErrorCode; message: string } };
 
 async function call(path: string, init: RequestInit = {}): Promise<CallResult> {
@@ -55,10 +56,11 @@ async function call(path: string, init: RequestInit = {}): Promise<CallResult> {
     });
     const body = await response.json().catch(() => null);
     if (!response.ok) {
-      const code =
+      const code: AuthErrorCode =
         response.status === 503 ? "unavailable" :
         response.status === 429 ? "rate_limit" :
-        response.status === 401 ? "invalid" : "invalid";
+        response.status === 401 ? "unauthorized" :
+        response.status >= 500 ? "server" : "invalid";
       const message = body?.error?.message ?? "Não foi possível concluir a operação.";
       return { error: { code, message } };
     }
@@ -100,13 +102,24 @@ const httpAuth: AuthClient = {
     if ("error" in result) return error(result);
     return { ok: true, account: toProfile(result.data as CustomerAccount) };
   },
+  async fetchAddresses() {
+    const result = await call(customerEndpoints.addresses);
+    if ("error" in result) return error(result);
+    if (!Array.isArray(result.data)) {
+      return { ok: false, code: "server", message: "Resposta inválida ao carregar seus endereços." };
+    }
+    return { ok: true, addresses: result.data as CustomerAddress[] };
+  },
   async saveAddress(input) {
     const result = await call(customerEndpoints.addresses, {
       method: "POST",
       body: JSON.stringify(input),
     });
     if ("error" in result) return error(result);
-    const data = result.data as { address: CustomerAddress; addresses: CustomerAddress[] };
+    const data = result.data as { address?: CustomerAddress; addresses?: CustomerAddress[] } | null;
+    if (!data?.address || !Array.isArray(data.addresses)) {
+      return { ok: false, code: "server", message: "Não foi possível confirmar o endereço salvo." };
+    }
     return { ok: true, address: data.address, addresses: data.addresses };
   },
   async updateAddress(id, input) {
@@ -115,7 +128,10 @@ const httpAuth: AuthClient = {
       body: JSON.stringify(input),
     });
     if ("error" in result) return error(result);
-    const data = result.data as { address: CustomerAddress; addresses: CustomerAddress[] };
+    const data = result.data as { address?: CustomerAddress; addresses?: CustomerAddress[] } | null;
+    if (!data?.address || !Array.isArray(data.addresses)) {
+      return { ok: false, code: "server", message: "Não foi possível confirmar a atualização do endereço." };
+    }
     return { ok: true, address: data.address, addresses: data.addresses };
   },
   async deleteAddress(id) {
@@ -123,7 +139,10 @@ const httpAuth: AuthClient = {
       method: "DELETE",
     });
     if ("error" in result) return error(result);
-    return { ok: true, addresses: (result.data as CustomerAddress[]) ?? [] };
+    if (!Array.isArray(result.data)) {
+      return { ok: false, code: "server", message: "Não foi possível confirmar a remoção do endereço." };
+    }
+    return { ok: true, addresses: result.data as CustomerAddress[] };
   },
   async signOut() {
     const result = await call(customerEndpoints.logout, { method: "POST" });
@@ -134,11 +153,23 @@ const httpAuth: AuthClient = {
 export const authClient: AuthClient = httpAuth;
 export const authEnabled = AUTH.enabled;
 
+export type SessionLookupResult =
+  | { ok: true; account: CustomerProfile | null }
+  | { ok: false; code: AuthErrorCode; message: string };
+
+/** Resolves the current signed-in customer, distinguishing transient errors from signed-out state. */
+export async function fetchCustomerSessionResult(): Promise<SessionLookupResult> {
+  const result = await call(customerEndpoints.session);
+  if ("error" in result) {
+    return { ok: false, code: result.error.code, message: result.error.message };
+  }
+  return { ok: true, account: result.data ? toProfile(result.data as CustomerAccount) : null };
+}
+
 /** Resolves the current signed-in customer from the session cookie (or null). */
 export async function fetchCustomerSession(): Promise<CustomerProfile | null> {
-  const result = await call(customerEndpoints.session);
-  if ("error" in result || !result.data) return null;
-  return toProfile(result.data as CustomerAccount);
+  const result = await fetchCustomerSessionResult();
+  return result.ok ? result.account : null;
 }
 
 type Errors = Record<string, string>;

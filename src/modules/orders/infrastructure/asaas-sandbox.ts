@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 import type { OrderStatus } from "@/shared/contracts/orders";
-import { pool, type Db } from "@/shared/server/database";
+import { sandboxPool, type Db } from "@/shared/server/database";
 import { AdminError } from "@/shared/server/validation";
 import { createOrderInput } from "../domain/order-input";
 import { cancelSandboxOrder, createOrder, getOrderDetail, reconcileSandboxOrder } from "./orders";
@@ -27,10 +27,21 @@ export interface SandboxDiagnostic {
 }
 
 async function transaction<T>(fn: (tx: PoolClient) => Promise<T>) {
-  const tx = await pool().connect();
+  const tx = await sandboxPool().connect();
   try { await tx.query("BEGIN"); const value = await fn(tx); await tx.query("COMMIT"); return value; }
   catch (error) { await tx.query("ROLLBACK"); throw error; }
   finally { tx.release(); }
+}
+
+/** Inserts a synthetic non-PII actor reference in the isolated Sandbox DB so order FKs succeed without copying production PII. */
+async function ensureSandboxShadowAccount(tx: PoolClient, accountId: string) {
+  const digest = createHash("sha256").update(accountId).digest("hex").slice(0, 24);
+  await tx.query(
+    `INSERT INTO customer_accounts (id, name, email, password_hash, phone, city, state, created_at, updated_at)
+     VALUES ($1, 'Admin Sandbox Teste', $2, 'sandbox-shadow-disabled', '11999990000', '', '', now(), now())
+     ON CONFLICT (id) DO NOTHING`,
+    [accountId, `sandbox-${digest}@sandbox.local`],
+  );
 }
 
 async function attempt(tx: PoolClient, id: string): Promise<Attempt> {
@@ -60,8 +71,14 @@ async function recordAttemptDiagnostic(
   );
 }
 
-export async function createSandboxPayment(value: unknown, accountId: string, origin: string, client = new AsaasClient()) {
-  const config = sandboxConfig();
+export async function createSandboxPayment(
+  value: unknown,
+  accountId: string,
+  origin: string,
+  client = new AsaasClient(),
+  options: { callbackPath?: string; requireAdminMode?: boolean } = {},
+) {
+  const config = sandboxConfig(options.requireAdminMode ? "admin" : "any");
   // Only cart lines, method and idempotency key come from the browser.
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new AdminError(422, "VALIDATION", "Pedido inválido.");
   const raw = value as Record<string, unknown>;
@@ -71,6 +88,7 @@ export async function createSandboxPayment(value: unknown, accountId: string, or
   if (input.paymentMethod === "pix" && !/^cus_[A-Za-z0-9]+$/.test(config.customer)) throw new AdminError(503, "SANDBOX_CUSTOMER", "Configure o cliente sintético Sandbox para Pix.");
   input.idempotencyKey = `asaas:${createHash("sha256").update(`${accountId}:${input.idempotencyKey}`).digest("hex")}`;
   const orderId = await transaction(async tx => {
+    await ensureSandboxShadowAccount(tx, accountId);
     // Core freezes server prices, checks accessory eligibility and reserves inventory.
     const order = await createOrder(input, { actorType: "customer", actorId: accountId }, tx, true);
     if (order.paymentProvider !== "asaas" || order.isDemo) throw new AdminError(409, "SANDBOX_ASSOCIATION", "Pedido incompatível.");
@@ -86,9 +104,13 @@ export async function createSandboxPayment(value: unknown, accountId: string, or
   });
   if (send) {
     try {
-      const order = await getOrderDetail(orderId);
+      const order = await getOrderDetail(orderId, sandboxPool());
       const reference = `th-sbx-${order.id}`;
-      const callback = `${origin}/checkout?asaasOrder=${encodeURIComponent(order.id)}`;
+      const callbackPath =
+        options.callbackPath && options.callbackPath.startsWith("/")
+          ? options.callbackPath
+          : "/checkout";
+      const callback = `${origin}${callbackPath}?asaasOrder=${encodeURIComponent(order.id)}`;
       const response = input.paymentMethod === "pix"
         ? await client.request("/payments", { customer: config.customer, billingType: "PIX", value: order.totalCents / 100, dueDate: new Date().toISOString().slice(0,10), externalReference: reference, description: "Acessórios sintéticos — teste Sandbox" })
         : await client.request("/checkouts", { billingTypes: ["CREDIT_CARD"], chargeTypes: ["DETACHED"], minutesToExpire: 30, externalReference: reference,
@@ -103,14 +125,14 @@ export async function createSandboxPayment(value: unknown, accountId: string, or
       });
     } catch (error) {
       const diag = diagnosticFromError(error, "PROVIDER_CREATE_FAILED");
-      await pool().query(
+      await sandboxPool().query(
         "UPDATE asaas_sandbox_attempts SET state='uncertain',last_error_code=$2,last_error_status=$3,last_error_at=now(),updated_at=now() WHERE order_id=$1 AND state='creating'",
         [orderId, diag.code, diag.httpStatus],
       );
       // Return the durable order handle so the user can reconcile this exact attempt.
     }
   }
-  return sandboxPaymentView(orderId, accountId, client);
+  return sandboxPaymentView(orderId, accountId, client, { requireAdminMode: options.requireAdminMode });
 }
 
 function dataList(value: Record<string, unknown>) {
@@ -173,10 +195,10 @@ async function reconcile(tx: PoolClient, a: Attempt, client: AsaasClient, candid
 }
 
 export async function adminReconcileSandbox(id: string, client = new AsaasClient()) {
-  sandboxConfig();
-  const result = await pool().query("SELECT customer_account_id FROM orders o JOIN asaas_sandbox_attempts a ON a.order_id=o.id WHERE o.id=$1 AND o.payment_provider='asaas' AND o.is_demo=false", [id]);
+  sandboxConfig("admin");
+  const result = await sandboxPool().query("SELECT customer_account_id FROM orders o JOIN asaas_sandbox_attempts a ON a.order_id=o.id WHERE o.id=$1 AND o.payment_provider='asaas' AND o.is_demo=false", [id]);
   if (!result.rows[0]?.customer_account_id) throw new AdminError(404,"NOT_FOUND","Pedido Sandbox não encontrado.");
-  return sandboxPaymentView(id,String(result.rows[0].customer_account_id),client);
+  return sandboxPaymentView(id, String(result.rows[0].customer_account_id), client, { allowAnyOwner: true, requireAdminMode: true });
 }
 
 export async function adminCancelSandboxAttempt(
@@ -185,7 +207,7 @@ export async function adminCancelSandboxAttempt(
   reason: string | undefined,
   client = new AsaasClient(),
 ) {
-  sandboxConfig();
+  sandboxConfig("admin");
   return transaction(async (tx) => {
     const a = await attempt(tx, id);
     const currentOrder = await getOrderDetail(id, tx);
@@ -252,22 +274,43 @@ export async function adminCancelSandboxAttempt(
   });
 }
 
-export async function sandboxPaymentView(id: string, accountId: string, client = new AsaasClient()) {
-  sandboxConfig();
-  const result = await pool().query("SELECT id FROM orders WHERE id=$1 AND customer_account_id=$2 AND payment_provider='asaas' AND is_demo=false", [id,accountId]);
-  if (!result.rows.length) throw new AdminError(404,"NOT_FOUND","Pedido Sandbox não encontrado.");
+export async function sandboxPaymentView(
+  id: string,
+  accountId: string,
+  client = new AsaasClient(),
+  options: { allowAnyOwner?: boolean; requireAdminMode?: boolean } = {},
+) {
+  sandboxConfig(options.requireAdminMode ? "admin" : "any");
+  const db = sandboxPool();
+  const result = options.allowAnyOwner
+    ? await db.query("SELECT id FROM orders WHERE id=$1 AND payment_provider='asaas' AND is_demo=false", [id])
+    : await db.query("SELECT id FROM orders WHERE id=$1 AND customer_account_id=$2 AND payment_provider='asaas' AND is_demo=false", [id, accountId]);
+  if (!result.rows.length) throw new AdminError(404, "NOT_FOUND", "Pedido Sandbox não encontrado.");
   let warning: string | undefined;
   let diagnostic: SandboxDiagnostic | undefined;
-  try { await transaction(async tx => { const a = await attempt(tx,id); await reconcile(tx,a,client); }); }
+  try { await transaction(async tx => { const a = await attempt(tx, id); await reconcile(tx, a, client); }); }
   catch (error) {
     if (!(error instanceof AdminError)) throw error;
     warning = error.code;
     diagnostic = diagnosticFromError(error, error.code);
-    await recordAttemptDiagnostic(pool(), id, diagnostic);
-    if (error.status === 409) await pool().query("UPDATE asaas_sandbox_attempts SET state='review' WHERE order_id=$1", [id]);
+    await recordAttemptDiagnostic(db, id, diagnostic);
+    if (error.status === 409) await db.query("UPDATE asaas_sandbox_attempts SET state='review' WHERE order_id=$1", [id]);
   }
-  const order = await getOrderDetail(id);
-  const a = (await pool().query("SELECT * FROM asaas_sandbox_attempts WHERE order_id=$1",[id])).rows[0] as Attempt;
+  const order = await getOrderDetail(id, db);
+  const a = (await db.query("SELECT * FROM asaas_sandbox_attempts WHERE order_id=$1", [id])).rows[0] as Attempt;
+  const productIds = Array.from(new Set(order.items.map((item) => item.productId)));
+  const stockRows = productIds.length
+    ? (
+        await db.query(
+          `SELECT p.id AS "productId", p.name AS "productName", COALESCE(i.quantity, 0)::int AS quantity
+             FROM products p
+             LEFT JOIN inventory i ON i.product_id = p.id
+            WHERE p.id = ANY($1::text[])
+            ORDER BY p.name ASC`,
+          [productIds],
+        )
+      ).rows as Array<{ productId: string; productName: string; quantity: number }>
+    : [];
   let pix: { encodedImage: string; payload: string; expirationDate: string } | undefined;
   if (a.method === "pix" && a.payment_id && order.status === "pending_payment" && a.state === "ready" && !warning) {
     try {
@@ -277,13 +320,13 @@ export async function sandboxPaymentView(id: string, accountId: string, client =
     } catch (error) {
       warning = "ASAAS_QR_UNAVAILABLE";
       diagnostic = diagnosticFromError(error, "ASAAS_QR_UNAVAILABLE");
-      await recordAttemptDiagnostic(pool(), id, diagnostic);
+      await recordAttemptDiagnostic(db, id, diagnostic);
     }
   }
   if (!diagnostic && (warning || a.state === "uncertain" || a.state === "review") && a.last_error_code) {
     diagnostic = { code: a.last_error_code, httpStatus: a.last_error_status ?? null };
   }
-  return { order, attemptState: a.state, environment: "sandbox" as const, ...(pix ? { pix } : {}), ...(warning ? { warning } : {}), ...(diagnostic ? { diagnostic } : {}) };
+  return { order, attemptState: a.state, environment: "sandbox" as const, sandboxStock: stockRows, ...(pix ? { pix } : {}), ...(warning ? { warning } : {}), ...(diagnostic ? { diagnostic } : {}) };
 }
 
 export function parseAsaasEvent(value: unknown) {
@@ -345,9 +388,40 @@ export async function processAsaasEvent(value: unknown, client = new AsaasClient
 }
 
 export async function sandboxDashboard() {
-  sandboxConfig();
-  const summary = await pool().query("SELECT o.status,count(*)::int AS count,COALESCE(sum(o.total_cents),0)::bigint AS total_cents FROM orders o JOIN asaas_sandbox_attempts a ON a.order_id=o.id WHERE o.payment_provider='asaas' AND o.is_demo=false GROUP BY o.status ORDER BY o.status");
-  const attempts = await pool().query("SELECT o.id,o.order_number,o.status,o.payment_method,o.total_cents,o.stock_status,a.state,a.last_provider_status,a.last_error_code,a.last_error_status,a.last_error_at,a.updated_at FROM asaas_sandbox_attempts a JOIN orders o ON o.id=a.order_id WHERE o.payment_provider='asaas' AND o.is_demo=false ORDER BY a.updated_at DESC LIMIT 100");
-  const history = await pool().query("SELECT h.order_id,o.order_number,h.from_status,h.to_status,h.reason,h.created_at FROM order_status_history h JOIN asaas_sandbox_attempts a ON a.order_id=h.order_id JOIN orders o ON o.id=h.order_id ORDER BY h.created_at DESC LIMIT 100");
-  return { environment: "sandbox", notice: "Testes sintéticos sem receita real", summary: summary.rows, attempts: attempts.rows, history: history.rows };
+  const config = sandboxConfig("admin");
+  const db = sandboxPool();
+  const ids = [...config.productIds];
+  const [summary, attempts, history, products] = await Promise.all([
+    db.query("SELECT o.status,count(*)::int AS count,COALESCE(sum(o.total_cents),0)::bigint AS total_cents FROM orders o JOIN asaas_sandbox_attempts a ON a.order_id=o.id WHERE o.payment_provider='asaas' AND o.is_demo=false GROUP BY o.status ORDER BY o.status"),
+    db.query("SELECT o.id,o.order_number,o.status,o.payment_method,o.total_cents,o.stock_status,a.state,a.last_provider_status,a.last_error_code,a.last_error_status,a.last_error_at,a.updated_at FROM asaas_sandbox_attempts a JOIN orders o ON o.id=a.order_id WHERE o.payment_provider='asaas' AND o.is_demo=false ORDER BY a.updated_at DESC LIMIT 100"),
+    db.query("SELECT h.order_id,o.order_number,h.from_status,h.to_status,h.reason,h.created_at FROM order_status_history h JOIN asaas_sandbox_attempts a ON a.order_id=h.order_id JOIN orders o ON o.id=h.order_id ORDER BY h.created_at DESC LIMIT 100"),
+    ids.length
+      ? db.query(
+          `SELECT p.id, p.sku, p.slug, p.name, p.price_cents, p.variants, COALESCE(i.quantity, 0)::int AS stock
+             FROM products p
+             LEFT JOIN inventory i ON i.product_id = p.id
+            WHERE p.id = ANY($1::text[])
+              AND p.active = true
+              AND p.archived_at IS NULL
+            ORDER BY p.name ASC`,
+          [ids],
+        )
+      : Promise.resolve({ rows: [] }),
+  ]);
+  return {
+    environment: "sandbox" as const,
+    notice: "Testes sintéticos sem receita real",
+    summary: summary.rows,
+    attempts: attempts.rows,
+    history: history.rows,
+    products: products.rows as Array<{
+      id: string;
+      sku: string;
+      slug: string;
+      name: string;
+      price_cents: number;
+      variants: string[];
+      stock: number;
+    }>,
+  };
 }

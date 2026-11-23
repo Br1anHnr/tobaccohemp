@@ -32,4 +32,8 @@ export type AuthResult =
       resetToken?: string;
       message?: string;
     }
-  | { ok: false; code: "invalid" | "network" | "unavailable" | "rate_limit"; message: string };
+  | {
+      ok: false;
+      code: "invalid" | "unauthorized" | "network" | "unavailable" | "rate_limit" | "server";
+      message: string;
+    };
