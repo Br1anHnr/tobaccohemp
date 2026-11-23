@@ -99,9 +99,14 @@ export function AsaasSandboxDashboard() {
     <div className="asaas-dashboard">
       <div className="order-actions-row">
         {role === "admin" && (
-          <Link className="button button-primary" href="/admin/teste-pagamento">
-            Abrir área de teste de pagamento
-          </Link>
+          <>
+            <Link className="button button-primary" href="/admin/teste-pagamento">
+              Abrir área de teste de pagamento
+            </Link>
+            <Link className="button button-secondary" href="/checkout">
+              Testar no checkout da loja
+            </Link>
+          </>
         )}
         <Button onClick={refresh} variant="secondary">Atualizar painel Sandbox</Button>
       </div>

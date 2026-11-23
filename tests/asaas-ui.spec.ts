@@ -390,3 +390,124 @@ test("Admin Sandbox test checkout persists/reuses customer address cleanly and r
   await expect(page.locator(".checkout-saved-addresses")).toContainText("Rua do Teste, 10");
   await expect(page.locator("#checkout-address")).toHaveCount(0);
 });
+
+test("Admin-authenticated storefront /checkout runs Asaas Sandbox with saved address reuse and hosted card redirect", async ({ page }) => {
+  const savedAddresses = [
+    {
+      id: "addr-prod-1",
+      label: "Principal",
+      zip: "12513612",
+      street: "Ivan Madergan",
+      number: "101",
+      complement: "Casa",
+      city: "Guaratinguetá",
+      state: "SP",
+      isDefault: true,
+      updatedAt: now,
+    },
+  ];
+  const accountWithAddress = {
+    ...syntheticAccount,
+    name: "BRIAN HENRIQUE",
+    city: "Guaratinguetá",
+    state: "SP",
+    addresses: savedAddresses,
+  };
+  let orderStatus: "pending_payment" | "canceled" = "pending_payment";
+  let adminCheckoutCalls = 0;
+  let cancelCalls = 0;
+
+  const trayReceipt = () => ({
+    ...receipt("card", orderStatus),
+    sandboxStock: [
+      {
+        productId: "tray-01",
+        productName: "Bandeja Black",
+        quantity: orderStatus === "canceled" ? 16 : 15,
+      },
+    ],
+    order: {
+      ...receipt("card", orderStatus).order,
+      id: "sandbox-tray-order",
+      orderNumber: "TH-SANDBOX-TRAY",
+      subtotalCents: 3990,
+      totalCents: 3990,
+      checkoutUrl: "https://sandbox.asaas.com/checkoutSession/show?id=checkout_storefront_card",
+      items: [
+        {
+          id: "item-tray-1",
+          orderId: "sandbox-tray-order",
+          productId: "tray-01",
+          sku: "TH-TRAY-01",
+          productName: "Bandeja Black",
+          categorySlug: "bandejas",
+          variant: "",
+          quantity: 1,
+          unitPriceCents: 3990,
+          lineTotalCents: 3990,
+          eligible: true,
+        },
+      ],
+    },
+  });
+
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "th-cart-v1",
+      JSON.stringify({
+        state: { items: [{ productId: "tray-01", quantity: 1, variant: "" }], favorites: [] },
+        version: 0,
+      }),
+    );
+  });
+  await page.route("**/api/checkout/asaas/config", (route) =>
+    route.fulfill({ json: { data: { enabled: true, mode: "admin_sandbox" } } }),
+  );
+  await page.route("**/api/auth/login", (route) => route.fulfill({ json: { data: accountWithAddress } }));
+  await page.route("**/api/auth/session", (route) => route.fulfill({ json: { data: accountWithAddress } }));
+  await page.route("**/api/auth/addresses", (route) => route.fulfill({ json: { data: savedAddresses } }));
+  await page.route("**/api/admin/asaas/checkout", async (route) => {
+    adminCheckoutCalls++;
+    expect(route.request().postDataJSON()).toMatchObject({
+      paymentMethod: "card",
+      callbackPath: "/checkout",
+      items: [{ productId: "tray-01", quantity: 1 }],
+    });
+    await route.fulfill({ json: { data: trayReceipt() } });
+  });
+  await page.route("**/api/admin/asaas/orders/sandbox-tray-order", (route) =>
+    route.fulfill({ json: { data: trayReceipt() } }),
+  );
+  await page.route("**/api/admin/asaas/cancel", (route) => {
+    cancelCalls++;
+    expect(route.request().postDataJSON()).toEqual({ orderId: "sandbox-tray-order" });
+    orderStatus = "canceled";
+    return route.fulfill({ json: { data: { order: trayReceipt().order } } });
+  });
+  await page.route("https://sandbox.asaas.com/**", (route) =>
+    route.fulfill({ status: 200, contentType: "text/html", body: "<html><body><h1>Asaas Hosted Mock</h1></body></html>" }),
+  );
+
+  await enterCheckout(page);
+  await expect(page.getByText("Modo administrador ativo (Asaas Sandbox · banco isolado).", { exact: false })).toBeVisible();
+  await expect(page.locator(".checkout-saved-addresses")).toContainText("Ivan Madergan, 101");
+  await expect(page.locator("#checkout-address")).toHaveCount(0);
+  await expect(page.getByText("1 × Bandeja Black").first()).toBeVisible();
+  await expect(page.locator("#asaas-method-pix")).toBeVisible();
+  await expect(page.locator("#asaas-method-card")).toBeVisible();
+
+  await page.locator("#asaas-method-card").check();
+  await page.getByRole("button", { name: "Finalizar pedido" }).click();
+  await expect(page).toHaveURL("https://sandbox.asaas.com/checkoutSession/show?id=checkout_storefront_card");
+  expect(adminCheckoutCalls).toBe(1);
+
+  await page.goto("/checkout?asaasOrder=sandbox-tray-order");
+  await expect(page.getByRole("heading", { name: "Pedido TH-SANDBOX-TRAY" })).toBeVisible();
+  await expect(page.getByText("Estoque isolado: Bandeja Black: 15 un.")).toBeVisible();
+  expect((await new AxeBuilder({ page }).include('[aria-label="Pagamento do pedido"]').analyze()).violations).toEqual([]);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+
+  await page.getByRole("button", { name: "Cancelar e liberar estoque" }).click();
+  expect(cancelCalls).toBe(1);
+  await expect(page.getByText("Cancelado · R$ 39,90")).toBeVisible();
+});

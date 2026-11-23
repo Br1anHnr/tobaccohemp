@@ -21,7 +21,7 @@ export const GET = customerRoute(async (request, account) => {
   const sandboxOrders = (await listCustomerOrders(account!.id, sandboxPool())).map(
     (order): CustomerOrderDetail => ({
       ...order,
-      detailPath: `/admin/teste-pagamento?asaasOrder=${encodeURIComponent(order.id)}`,
+      detailPath: `/checkout?asaasOrder=${encodeURIComponent(order.id)}`,
     }),
   );
   const merged = [...sandboxOrders, ...orders];

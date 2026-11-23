@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, ExternalLink, LoaderCircle } from "lucide-react";
 import { useCart } from "@/store/cart-store";
 import { useAccount } from "@/store/account-store";
 import { Button, ButtonLink } from "@/components/ui/Button";
@@ -12,16 +12,20 @@ import type { sandboxPaymentView } from "@/modules/orders/infrastructure/asaas-s
 
 export type SandboxPaymentData = Awaited<ReturnType<typeof sandboxPaymentView>>;
 const handleKey = "th-asaas-sandbox-attempt";
+const SANDBOX_CHECKOUT_ORIGIN = "https://sandbox.asaas.com";
 
 export function AsaasSandboxCheckout({
+  mode = "preview_sandbox",
   beforeCreate,
   onPaymentChange,
   onResetNotice,
 }: {
+  mode?: "preview_sandbox" | "admin_sandbox";
   beforeCreate?: () => Promise<boolean>;
   onPaymentChange?: (payment: SandboxPaymentData | null) => void;
   onResetNotice?: (notice: string) => void;
 }) {
+  const isAdminSandbox = mode === "admin_sandbox";
   const items = useCart(s => s.items);
   const clearCart = useCart(s => s.clear);
   const customer = useAccount(s => s.customer);
@@ -30,6 +34,7 @@ export function AsaasSandboxCheckout({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [hasSavedOrder, setHasSavedOrder] = useState(false);
+  const [redirectingUrl, setRedirectingUrl] = useState<string | null>(null);
   const key = useRef<string | null>(null);
   const orderId = useRef<string | null>(null);
   const lock = useRef(false);
@@ -48,6 +53,7 @@ export function AsaasSandboxCheckout({
     orderId.current = null;
     setHasSavedOrder(false);
     setPayment(null);
+    setRedirectingUrl(null);
     setMessage(notice);
     onResetNotice?.(notice);
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).has("asaasOrder")) {
@@ -56,7 +62,10 @@ export function AsaasSandboxCheckout({
   }, [onResetNotice]);
 
   const load = useCallback(async (id: string) => {
-    const response = await fetch(`/api/checkout/asaas/${encodeURIComponent(id)}`, { cache: "no-store" });
+    const endpoint = isAdminSandbox
+      ? `/api/admin/asaas/orders/${encodeURIComponent(id)}`
+      : `/api/checkout/asaas/${encodeURIComponent(id)}`;
+    const response = await fetch(endpoint, { cache: "no-store" });
     const body = await response.json().catch(() => null);
     if (response.status === 404) {
       resetAttempt("Pedido anterior não encontrado nesta conta. Você pode iniciar um novo pedido.");
@@ -64,28 +73,42 @@ export function AsaasSandboxCheckout({
     }
     if (!response.ok) throw new Error(body?.error?.message ?? "Falha ao consultar pedido.");
     setPayment(body.data);
-  }, [resetAttempt]);
+  }, [isAdminSandbox, resetAttempt]);
 
   useEffect(() => {
+    let cancelled = false;
     const callbackId = new URLSearchParams(window.location.search).get("asaasOrder");
     try {
       const saved = JSON.parse(sessionStorage.getItem(handleKey) ?? "null");
-      key.current = saved?.key ?? null;
+      key.current = callbackId
+        ? (saved?.orderId === callbackId ? saved?.key ?? null : null)
+        : (saved?.key ?? null);
       orderId.current = callbackId ?? saved?.orderId ?? null;
     } catch {
+      key.current = null;
       orderId.current = callbackId;
     }
-    setHasSavedOrder(Boolean(orderId.current));
-    if (orderId.current && customer) {
-      void load(orderId.current).catch(error => setMessage(error.message));
-    }
-  }, [customer, load]);
+    const targetId = orderId.current;
+    void Promise.resolve().then(() => {
+      if (cancelled) return;
+      setHasSavedOrder(Boolean(targetId));
+      if (targetId && (customer || isAdminSandbox)) {
+        void load(targetId).catch((error) => {
+          if (!cancelled) setMessage(error.message);
+        });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [customer, isAdminSandbox, load]);
 
   async function create() {
     if (lock.current) return;
     lock.current = true;
     setBusy(true);
     setMessage("");
+    setRedirectingUrl(null);
     try {
       if (!orderId.current && beforeCreate) {
         const ready = await beforeCreate();
@@ -97,11 +120,19 @@ export function AsaasSandboxCheckout({
         await load(orderId.current);
         return;
       }
-      const response = await fetch("/api/checkout/asaas", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items, paymentMethod: method, idempotencyKey: key.current }),
-      });
+      const response = await fetch(
+        isAdminSandbox ? "/api/admin/asaas/checkout" : "/api/checkout/asaas",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items,
+            paymentMethod: method,
+            idempotencyKey: key.current,
+            ...(isAdminSandbox ? { callbackPath: "/checkout" } : {}),
+          }),
+        },
+      );
       const body = await response.json().catch(() => null);
       if (!response.ok) throw new Error(body?.error?.message ?? "Não foi possível registrar o pedido.");
       const data = body.data as SandboxPaymentData;
@@ -110,6 +141,20 @@ export function AsaasSandboxCheckout({
       sessionStorage.setItem(handleKey, JSON.stringify({ key: key.current, orderId: orderId.current }));
       setPayment(data);
       clearCart();
+
+      if (isAdminSandbox && method === "card" && data.order.checkoutUrl) {
+        let parsedOrigin = "";
+        try {
+          parsedOrigin = new URL(data.order.checkoutUrl).origin;
+        } catch {
+          parsedOrigin = "";
+        }
+        if (parsedOrigin === SANDBOX_CHECKOUT_ORIGIN) {
+          setRedirectingUrl(data.order.checkoutUrl);
+          window.location.assign(data.order.checkoutUrl);
+          return;
+        }
+      }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Não foi possível concluir a operação.");
     } finally {
@@ -118,9 +163,32 @@ export function AsaasSandboxCheckout({
     }
   }
 
+  async function handleCancelOrder() {
+    if (!payment || !isAdminSandbox || busy) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const response = await fetch("/api/admin/asaas/cancel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: payment.order.id }),
+      });
+      const body = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(body?.error?.message ?? "Não foi possível cancelar a tentativa.");
+      }
+      await load(payment.order.id);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Falha ao cancelar pedido de teste.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const canStartAnother =
     Boolean(payment) &&
-    (["paid", "refunded", "canceled", "expired"].includes(payment!.order.status) ||
+    (isAdminSandbox ||
+      ["paid", "refunded", "canceled", "expired"].includes(payment!.order.status) ||
       ["uncertain", "review"].includes(payment!.attemptState));
 
   const showPixFallbackNotice =
@@ -131,21 +199,23 @@ export function AsaasSandboxCheckout({
         payment!.attemptState === "ready" &&
         !payment!.pix));
 
+  const showAdminCallbackOrder = isAdminSandbox && (Boolean(payment) || hasSavedOrder);
+
   return (
     <section className="asaas-checkout-card" aria-label="Pagamento do pedido">
-      {!customer ? (
+      {!customer && !showAdminCallbackOrder ? (
         <div className="checkout-section checkout-guest-prompt">
           <p>Entre na sua conta ou crie um cadastro para finalizar o pedido.</p>
           <div className="checkout-guest-actions">
-            <ButtonLink href="/conta/entrar">Entrar na conta</ButtonLink>
-            <ButtonLink href="/conta/cadastro" variant="secondary">Criar conta</ButtonLink>
+            <ButtonLink href="/conta/entrar?next=/checkout">Entrar na conta</ButtonLink>
+            <ButtonLink href="/conta/cadastro?next=/checkout" variant="secondary">Criar conta</ButtonLink>
           </div>
         </div>
       ) : (
         <>
           {!payment && !hasSavedOrder && (
             <fieldset className="checkout-section checkout-payment-section" disabled={busy}>
-              <legend>Forma de pagamento</legend>
+              <legend>{isAdminSandbox ? "3. Pagamento (Asaas Sandbox)" : "Forma de pagamento"}</legend>
               <div className="checkout-choice-grid">
                 <label className="checkout-choice" htmlFor="asaas-method-pix">
                   <input
@@ -170,7 +240,11 @@ export function AsaasSandboxCheckout({
                   />
                   <span>
                     <strong>Cartão de crédito</strong>
-                    <small>Pagamento em ambiente seguro externo — nenhum dado do cartão é digitado neste site.</small>
+                    <small>
+                      {isAdminSandbox
+                        ? "Redireciona para o checkout seguro do Asaas Sandbox — nenhum dado do cartão é digitado neste site."
+                        : "Pagamento em ambiente seguro externo — nenhum dado do cartão é digitado neste site."}
+                    </small>
                   </span>
                 </label>
               </div>
@@ -183,7 +257,14 @@ export function AsaasSandboxCheckout({
               <p>
                 {ORDER_STATUS_LABEL[payment.order.status]} · {currency(payment.order.totalCents / 100)}
               </p>
-              <p className="muted">{ORDER_STOCK_STATUS_LABEL[payment.order.stockStatus ?? "none"]}</p>
+              <p className="muted">
+                {ORDER_STOCK_STATUS_LABEL[payment.order.stockStatus ?? "none"]}
+                {isAdminSandbox && payment.sandboxStock?.length
+                  ? ` · Estoque isolado: ${payment.sandboxStock
+                      .map((entry) => `${entry.productName}: ${entry.quantity} un.`)
+                      .join(", ")}`
+                  : ""}
+              </p>
 
               {payment.attemptState !== "ready" && (
                 <p role="status">
@@ -197,6 +278,18 @@ export function AsaasSandboxCheckout({
                 <p role="status">
                   Pedido registrado. O QR Code Pix está temporariamente indisponível nesta conta de testes; atualize o status abaixo ou tente novamente após ativação da chave Pix.
                 </p>
+              )}
+
+              {redirectingUrl && (
+                <div className="checkout-test-note" role="status">
+                  <LoaderCircle size={15} className="spin" aria-hidden="true" />
+                  <p>
+                    Redirecionando para o checkout hospedado do Asaas Sandbox…{" "}
+                    <a className="text-link" href={redirectingUrl}>
+                      Clique aqui se não redirecionar
+                    </a>
+                  </p>
+                </div>
               )}
 
               {payment.pix && (
@@ -233,15 +326,20 @@ export function AsaasSandboxCheckout({
               {payment.order.checkoutUrl &&
                 payment.order.status === "pending_payment" &&
                 payment.attemptState === "ready" &&
-                !payment.warning && (
+                !payment.warning &&
+                !redirectingUrl && (
                   <p>
                     <a
                       className="button button-primary"
                       href={payment.order.checkoutUrl}
-                      target="_blank"
-                      rel="noreferrer"
+                      {...(isAdminSandbox ? {} : { target: "_blank", rel: "noreferrer" })}
                     >
-                      Pagar com cartão <ArrowRight size={17} aria-hidden="true" />
+                      Pagar com cartão{" "}
+                      {isAdminSandbox ? (
+                        <ExternalLink size={17} aria-hidden="true" />
+                      ) : (
+                        <ArrowRight size={17} aria-hidden="true" />
+                      )}
                     </a>
                   </p>
                 )}
@@ -267,11 +365,18 @@ export function AsaasSandboxCheckout({
                   </li>
                 ))}
               </ul>
-              <p>
-                <Link href="/conta/pedidos" className="text-link">
-                  Ver em Meus pedidos
-                </Link>
-              </p>
+              <div className="checkout-actions-row">
+                {customer && (
+                  <Link href="/conta/pedidos" className="text-link">
+                    Ver em Meus pedidos
+                  </Link>
+                )}
+                {isAdminSandbox && (
+                  <Link href="/admin/asaas" className="text-link">
+                    Ver painel Asaas Sandbox
+                  </Link>
+                )}
+              </div>
             </div>
           )}
 
@@ -286,12 +391,28 @@ export function AsaasSandboxCheckout({
               {busy
                 ? payment || hasSavedOrder
                   ? "Atualizando…"
-                  : "Finalizando…"
+                  : isAdminSandbox && method === "card"
+                    ? "Redirecionando para o Asaas…"
+                    : "Finalizando…"
                 : payment || hasSavedOrder
                   ? "Atualizar status do pedido"
                   : "Finalizar pedido"}
               {!payment && !hasSavedOrder && <ArrowRight size={18} aria-hidden="true" />}
             </Button>
+            {isAdminSandbox &&
+              payment &&
+              !["paid", "refunded", "canceled", "expired"].includes(payment.order.status) && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={busy}
+                  onClick={() => {
+                    void handleCancelOrder();
+                  }}
+                >
+                  Cancelar e liberar estoque
+                </Button>
+              )}
             {canStartAnother && (
               <Button type="button" variant="ghost" disabled={busy} onClick={() => resetAttempt("")}>
                 Fazer novo pedido

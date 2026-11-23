@@ -25,7 +25,7 @@ export function AdminLogin() {
       setPassword("");
       const next = new URLSearchParams(window.location.search).get("next") ?? "/admin";
       router.replace(
-        /^\/admin(?:\/(?:clientes|produtos|categorias|pedidos|asaas|teste-pagamento))?(?:\?asaasOrder=[A-Za-z0-9_-]{1,80})?$/.test(
+        /^(?:\/checkout|\/admin(?:\/(?:clientes|produtos|categorias|pedidos|asaas|teste-pagamento))?)(?:\?asaasOrder=[A-Za-z0-9_-]{1,80})?$/.test(
           next,
         )
           ? next

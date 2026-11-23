@@ -3,12 +3,14 @@ import { NextRequest } from "next/server";
 import { execFileSync } from "node:child_process";
 import { pool, hasIsolatedSandboxDatabase } from "../../src/shared/server/database";
 import { ensureSchema, migrations } from "../../src/shared/server/migrate";
-import { signUpCustomer, customerSessionCookie } from "../../src/modules/auth";
+import { signUpCustomer, customerSessionCookie, bootstrapAdminAccount, authenticate, sessionCookie } from "../../src/modules/auth";
 import { createOrder, getOrderDetail, expireOverdueOrders, transitionOrderStatus, listOrderHistory, listCustomerOrders } from "../../src/modules/orders";
 import { createSandboxPayment, processAsaasEvent, sandboxPaymentView, sandboxDashboard, adminCancelSandboxAttempt } from "../../src/modules/orders/infrastructure/asaas-sandbox";
 import { AsaasClient, ASAAS_SANDBOX_BASE, adminSandboxEnabled, sandboxEnabled } from "../../src/modules/orders/infrastructure/asaas-client";
 import { customerAuthEnabled } from "../../src/shared/server/preview";
 import { POST as webhook } from "../../src/app/api/webhooks/asaas/route";
+import { GET as asaasConfigRoute } from "../../src/app/api/checkout/asaas/config/route";
+import { POST as adminCheckoutRoute } from "../../src/app/api/admin/asaas/checkout/route";
 import { POST as checkout } from "../../src/app/api/checkout/asaas/route";
 import { GET as lookup } from "../../src/app/api/checkout/asaas/[id]/route";
 import { GET as customerOrdersRoute } from "../../src/app/api/auth/orders/route";
@@ -377,4 +379,83 @@ test("customer order history endpoint isolates accounts and admin demo history e
 
   const adminDemoHistory = await listOrderHistory(50);
   expect(adminDemoHistory.some(entry => ordersA.some(o => o.id === entry.orderId))).toBe(false);
+});
+
+test("checkout config unlocks admin_sandbox only for authenticated admin in production and /api/admin/asaas/checkout validates callbackPath", async () => {
+  const saved = { ...process.env };
+  let adminToken = "";
+  try {
+    process.env.ADMIN_EMAIL = "admin-sandbox-config@example.test";
+    process.env.ADMIN_PASSWORD = "SyntheticAdminPassword123!";
+    await bootstrapAdminAccount();
+    const authResult = await authenticate({
+      email: process.env.ADMIN_EMAIL,
+      password: process.env.ADMIN_PASSWORD,
+    });
+    adminToken = authResult.token;
+
+    process.env.VERCEL = "1";
+    process.env.VERCEL_ENV = "production";
+    process.env.APP_BACKEND_ENABLED = "1";
+    process.env.APP_ORIGIN = "https://tobaccohemp.vercel.app";
+    process.env.ADMIN_ENABLED = "1";
+    process.env.ASAAS_SANDBOX_ADMIN_ONLY = "1";
+    process.env.ASAAS_SANDBOX_DATABASE_URL = "postgresql://u:p@ep-abc-pooler.sa-east-1.aws.neon.tech/th_asaas_isolated";
+
+    const anonRes = await asaasConfigRoute(request("/api/checkout/asaas/config"));
+    expect(anonRes.status).toBe(200);
+    expect(anonRes.headers.get("cache-control")).toBe("no-store");
+    expect(anonRes.headers.get("vary")).toBe("Cookie");
+    expect(await anonRes.json()).toEqual({ data: { enabled: false, mode: "disabled" } });
+
+    const customerOnlyRes = await asaasConfigRoute(
+      request("/api/checkout/asaas/config", undefined, { Cookie: `${customerSessionCookie}=${account.token}` }),
+    );
+    expect(await customerOnlyRes.json()).toEqual({ data: { enabled: false, mode: "disabled" } });
+
+    const invalidAdminRes = await asaasConfigRoute(
+      request("/api/checkout/asaas/config", undefined, { Cookie: `${sessionCookie}=invalid-admin-token` }),
+    );
+    expect(await invalidAdminRes.json()).toEqual({ data: { enabled: false, mode: "disabled" } });
+
+    const adminRes = await asaasConfigRoute(
+      request("/api/checkout/asaas/config", undefined, { Cookie: `${sessionCookie}=${adminToken}` }),
+    );
+    expect(adminRes.status).toBe(200);
+    expect(adminRes.headers.get("cache-control")).toBe("no-store");
+    expect(adminRes.headers.get("vary")).toBe("Cookie");
+    expect(await adminRes.json()).toEqual({ data: { enabled: true, mode: "admin_sandbox" } });
+  } finally {
+    process.env = saved;
+  }
+
+  const original = globalThis.fetch;
+  globalThis.fetch = mockFetch;
+  try {
+    const adminHeaders = {
+      Origin: origin,
+      Cookie: `${sessionCookie}=${adminToken}; ${customerSessionCookie}=${account.token}`,
+    };
+    const badCallback = await adminCheckoutRoute(
+      request("/api/admin/asaas/checkout", { ...input("bad-callback", "card"), callbackPath: "https://evil.test" }, adminHeaders),
+    );
+    expect(badCallback.status).toBe(422);
+
+    const otherPathCallback = await adminCheckoutRoute(
+      request("/api/admin/asaas/checkout", { ...input("other-path", "card"), callbackPath: "/conta/pedidos" }, adminHeaders),
+    );
+    expect(otherPathCallback.status).toBe(422);
+
+    const okRes = await adminCheckoutRoute(
+      request("/api/admin/asaas/checkout", { ...input("storefront-callback", "card"), callbackPath: "/checkout" }, adminHeaders),
+    );
+    expect(okRes.status).toBe(200);
+    const created = (await okRes.json()).data as { order: { id: string; customerAccountId: string } };
+    expect(created.order.customerAccountId).toBe(account.id);
+    const checkoutReq = requests.findLast((r) => r.url.endsWith("/checkouts"));
+    const sentBody = JSON.parse(String(checkoutReq?.init?.body));
+    expect(sentBody.callback.successUrl).toBe(`${origin}/checkout?asaasOrder=${encodeURIComponent(created.order.id)}`);
+  } finally {
+    globalThis.fetch = original;
+  }
 });

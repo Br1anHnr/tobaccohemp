@@ -10,6 +10,7 @@ import {
   Plus,
   RefreshCw,
   ShieldAlert,
+  ShieldCheck,
   UserCheck,
 } from "lucide-react";
 import { useCart } from "@/store/cart-store";
@@ -33,6 +34,7 @@ import { AsaasSandboxCheckout, type SandboxPaymentData } from "./AsaasSandboxChe
 
 type CheckoutFieldKey = (typeof checkoutFields)[number]["name"] | "state";
 type AddressMode = "saved" | "edit" | "new";
+type SandboxMode = "disabled" | "preview_sandbox" | "admin_sandbox";
 
 function defaultFieldValue(
   customer: CustomerProfile | null,
@@ -92,7 +94,10 @@ export function CheckoutForm({
   const summary = useRef<HTMLDivElement>(null);
   const alertRef = useRef<HTMLDivElement>(null);
 
-  const [sandboxAvailable, setSandboxAvailable] = useState(initialSandboxAvailable);
+  const [sandboxMode, setSandboxMode] = useState<SandboxMode>(
+    initialSandboxAvailable ? "preview_sandbox" : "disabled",
+  );
+  const sandboxAvailable = sandboxMode !== "disabled";
   const [sandboxConfigReady, setSandboxConfigReady] = useState(initialSandboxAvailable);
   const [activeSandboxPayment, setActiveSandboxPayment] = useState<SandboxPaymentData | null>(null);
   const [sandboxResetNotice, setSandboxResetNotice] = useState("");
@@ -104,10 +109,14 @@ export function CheckoutForm({
 
   useEffect(() => {
     if (initialSandboxAvailable) return;
-    void fetch("/api/checkout/asaas/config")
+    void fetch("/api/checkout/asaas/config", { cache: "no-store" })
       .then((r) => r.json())
       .then((body) => {
-        setSandboxAvailable(body.data?.enabled === true);
+        if (body.data?.enabled === true) {
+          setSandboxMode(body.data?.mode === "admin_sandbox" ? "admin_sandbox" : "preview_sandbox");
+        } else {
+          setSandboxMode("disabled");
+        }
       })
       .catch(() => {})
       .finally(() => setSandboxConfigReady(true));
@@ -145,11 +154,7 @@ export function CheckoutForm({
     }
   }
 
-  const waitingConfig = !sandboxConfigReady && (!items.length ? hasAsaasLookup : true);
-  if (!cartHydrated || !accountHydrated || sessionPending || (!sandboxConfigReady && waitingConfig && !items.length)) {
-    return <p role="status">Carregando sua seleção…</p>;
-  }
-  if (!sandboxConfigReady && items.length > 0 && hasAsaasLookup) {
+  if (!cartHydrated || !accountHydrated || sessionPending || !sandboxConfigReady) {
     return <p role="status">Carregando sua seleção…</p>;
   }
 
@@ -623,8 +628,23 @@ export function CheckoutForm({
       <div className="commerce-columns checkout-columns">
         <div>
           <div className="checkout-test-note" role="note">
-            <Check size={15} aria-hidden="true" />
-            <p>Ambiente de homologação — cobranças reais estão desabilitadas neste Preview.</p>
+            {sandboxMode === "admin_sandbox" ? (
+              <>
+                <ShieldCheck size={15} aria-hidden="true" />
+                <p>
+                  <strong>Modo administrador ativo (Asaas Sandbox · banco isolado).</strong>{" "}
+                  Sem cobrança real e sem alterar pedidos ou estoque comercial.{" "}
+                  <Link href="/admin/asaas" className="text-link">
+                    Painel Sandbox
+                  </Link>
+                </p>
+              </>
+            ) : (
+              <>
+                <Check size={15} aria-hidden="true" />
+                <p>Ambiente de homologação — cobranças reais estão desabilitadas neste Preview.</p>
+              </>
+            )}
           </div>
 
           {addressAlertBox}
@@ -705,6 +725,7 @@ export function CheckoutForm({
           )}
 
           <AsaasSandboxCheckout
+            mode={sandboxMode === "admin_sandbox" ? "admin_sandbox" : "preview_sandbox"}
             beforeCreate={validateAndSaveSandboxDelivery}
             onPaymentChange={handleSandboxPaymentChange}
             onResetNotice={setSandboxResetNotice}
