@@ -7,28 +7,34 @@ import { useCart } from "@/store/cart-store";
 import { useAccount } from "@/store/account-store";
 import { Button, ButtonLink } from "@/components/ui/Button";
 import { currency } from "@/lib/currency";
+import { sessionExpiredEvent } from "@/lib/admin-service";
+import { readSandboxAttempt, saveSandboxAttempt } from "@/lib/sandbox-attempt";
+import { ASAAS_SANDBOX, STORAGE } from "@/lib/constants";
 import { ORDER_STATUS_LABEL, ORDER_STOCK_STATUS_LABEL } from "@/modules/orders/domain/order-status";
 import type { sandboxPaymentView } from "@/modules/orders/infrastructure/asaas-sandbox";
 
 export type SandboxPaymentData = Awaited<ReturnType<typeof sandboxPaymentView>>;
-const handleKey = "th-asaas-sandbox-attempt";
-const SANDBOX_CHECKOUT_ORIGIN = "https://sandbox.asaas.com";
+const handleKey = STORAGE.storefrontSandboxAttempt;
+const SANDBOX_CHECKOUT_ORIGIN = new URL(ASAAS_SANDBOX.checkoutBase).origin;
 
 export function AsaasSandboxCheckout({
   mode = "preview_sandbox",
+  callbackOrderId = null,
   beforeCreate,
   onPaymentChange,
   onResetNotice,
 }: {
   mode?: "preview_sandbox" | "admin_sandbox";
+  callbackOrderId?: string | null;
   beforeCreate?: () => Promise<boolean>;
   onPaymentChange?: (payment: SandboxPaymentData | null) => void;
   onResetNotice?: (notice: string) => void;
 }) {
   const isAdminSandbox = mode === "admin_sandbox";
   const items = useCart(s => s.items);
-  const clearCart = useCart(s => s.clear);
+  const consumeCart = useCart(s => s.consume);
   const customer = useAccount(s => s.customer);
+  const canAccessPayment = Boolean(customer) || isAdminSandbox;
   const [method, setMethod] = useState<"pix" | "card">("pix");
   const [payment, setPayment] = useState<SandboxPaymentData | null>(null);
   const [busy, setBusy] = useState(false);
@@ -61,12 +67,14 @@ export function AsaasSandboxCheckout({
     }
   }, [onResetNotice]);
 
-  const load = useCallback(async (id: string) => {
+  const load = useCallback(async (id: string, signal?: AbortSignal) => {
     const endpoint = isAdminSandbox
       ? `/api/admin/asaas/orders/${encodeURIComponent(id)}`
       : `/api/checkout/asaas/${encodeURIComponent(id)}`;
-    const response = await fetch(endpoint, { cache: "no-store" });
+    const response = await fetch(endpoint, { cache: "no-store", signal });
     const body = await response.json().catch(() => null);
+    if (signal?.aborted) return;
+    if (isAdminSandbox && response.status === 401) window.dispatchEvent(new Event(sessionExpiredEvent));
     if (response.status === 404) {
       resetAttempt("Pedido anterior não encontrado nesta conta. Você pode iniciar um novo pedido.");
       return;
@@ -76,32 +84,22 @@ export function AsaasSandboxCheckout({
   }, [isAdminSandbox, resetAttempt]);
 
   useEffect(() => {
-    let cancelled = false;
-    const callbackId = new URLSearchParams(window.location.search).get("asaasOrder");
-    try {
-      const saved = JSON.parse(sessionStorage.getItem(handleKey) ?? "null");
-      key.current = callbackId
-        ? (saved?.orderId === callbackId ? saved?.key ?? null : null)
-        : (saved?.key ?? null);
-      orderId.current = callbackId ?? saved?.orderId ?? null;
-    } catch {
-      key.current = null;
-      orderId.current = callbackId;
-    }
+    const controller = new AbortController();
+    const saved = readSandboxAttempt(handleKey);
+    if (!callbackOrderId || callbackOrderId === saved.orderId) key.current = saved.key ?? key.current;
+    orderId.current = callbackOrderId ?? saved.orderId ?? orderId.current;
     const targetId = orderId.current;
     void Promise.resolve().then(() => {
-      if (cancelled) return;
+      if (controller.signal.aborted) return;
       setHasSavedOrder(Boolean(targetId));
-      if (targetId && (customer || isAdminSandbox)) {
-        void load(targetId).catch((error) => {
-          if (!cancelled) setMessage(error.message);
+      if (targetId && canAccessPayment) {
+        void load(targetId, controller.signal).catch((error) => {
+          if (!controller.signal.aborted) setMessage(error.message);
         });
       }
     });
-    return () => {
-      cancelled = true;
-    };
-  }, [customer, isAdminSandbox, load]);
+    return () => controller.abort();
+  }, [callbackOrderId, canAccessPayment, load]);
 
   async function create() {
     if (lock.current) return;
@@ -115,11 +113,11 @@ export function AsaasSandboxCheckout({
         if (!ready) return;
       }
       key.current ??= crypto.randomUUID();
-      sessionStorage.setItem(handleKey, JSON.stringify({ key: key.current, orderId: orderId.current }));
       if (orderId.current) {
         await load(orderId.current);
         return;
       }
+      saveSandboxAttempt(handleKey, key.current, null);
       const response = await fetch(
         isAdminSandbox ? "/api/admin/asaas/checkout" : "/api/checkout/asaas",
         {
@@ -134,13 +132,14 @@ export function AsaasSandboxCheckout({
         },
       );
       const body = await response.json().catch(() => null);
+      if (isAdminSandbox && response.status === 401) window.dispatchEvent(new Event(sessionExpiredEvent));
       if (!response.ok) throw new Error(body?.error?.message ?? "Não foi possível registrar o pedido.");
       const data = body.data as SandboxPaymentData;
       orderId.current = data.order.id;
       setHasSavedOrder(true);
-      sessionStorage.setItem(handleKey, JSON.stringify({ key: key.current, orderId: orderId.current }));
       setPayment(data);
-      clearCart();
+      saveSandboxAttempt(handleKey, key.current, orderId.current);
+      consumeCart(items);
 
       if (isAdminSandbox && method === "card" && data.order.checkoutUrl) {
         let parsedOrigin = "";
@@ -174,6 +173,7 @@ export function AsaasSandboxCheckout({
         body: JSON.stringify({ orderId: payment.order.id }),
       });
       const body = await response.json().catch(() => null);
+      if (response.status === 401) window.dispatchEvent(new Event(sessionExpiredEvent));
       if (!response.ok) {
         throw new Error(body?.error?.message ?? "Não foi possível cancelar a tentativa.");
       }
@@ -191,19 +191,12 @@ export function AsaasSandboxCheckout({
       ["paid", "refunded", "canceled", "expired"].includes(payment!.order.status) ||
       ["uncertain", "review"].includes(payment!.attemptState));
 
-  const showPixFallbackNotice =
-    Boolean(payment) &&
-    (payment!.warning ||
-      (payment!.order.paymentMethod === "pix" &&
-        payment!.order.status === "pending_payment" &&
-        payment!.attemptState === "ready" &&
-        !payment!.pix));
-
-  const showAdminCallbackOrder = isAdminSandbox && (Boolean(payment) || hasSavedOrder);
+  const showPixFallbackNotice = payment?.order.paymentMethod === "pix" &&
+    payment.order.status === "pending_payment" && payment.attemptState === "ready" && !payment.pix;
 
   return (
     <section className="asaas-checkout-card" aria-label="Pagamento do pedido">
-      {!customer && !showAdminCallbackOrder ? (
+      {!canAccessPayment ? (
         <div className="checkout-section checkout-guest-prompt">
           <p>Entre na sua conta ou crie um cadastro para finalizar o pedido.</p>
           <div className="checkout-guest-actions">
@@ -278,6 +271,9 @@ export function AsaasSandboxCheckout({
                 <p role="status">
                   Pedido registrado. O QR Code Pix está temporariamente indisponível nesta conta de testes; atualize o status abaixo ou tente novamente após ativação da chave Pix.
                 </p>
+              )}
+              {payment.order.paymentMethod === "card" && payment.warning && (
+                <p role="status">O status do cartão está indisponível. Atualize o pedido para consultar o Asaas Sandbox.</p>
               )}
 
               {redirectingUrl && (

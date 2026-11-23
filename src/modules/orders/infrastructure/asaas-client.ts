@@ -121,14 +121,14 @@ function extractProviderCode(status: number, payload: unknown): string {
 export class AsaasClient {
   constructor(private readonly transport: typeof fetch = fetch) {}
 
-  async request(path: string, body?: Record<string, unknown>): Promise<Record<string, unknown>> {
+  async request(path: string, body?: Record<string, unknown>, method = body ? "POST" : "GET"): Promise<Record<string, unknown>> {
     const { key } = sandboxConfig();
-    if (!/^\/(payments(?:[/?]|$)|checkouts$)/.test(path)) throw new Error("Unsupported Asaas resource");
+    if (!/^\/(payments(?:[/?]|$)|checkouts(?:\/[A-Za-z0-9_-]+\/cancel)?$)/.test(path)) throw new Error("Unsupported Asaas resource");
     let httpStatus: number | null = null;
     let providerCode = "NETWORK_ERROR";
     try {
       const response = await this.transport(`${ASAAS_SANDBOX_BASE}${path}`, {
-        method: body ? "POST" : "GET", redirect: "error", cache: "no-store",
+        method, redirect: "error", cache: "no-store",
         signal: AbortSignal.timeout(10_000),
         headers: { access_token: key, "Content-Type": "application/json", "User-Agent": "TobaccoHemp-Sandbox/1.0" },
         ...(body ? { body: JSON.stringify(body) } : {}),
@@ -148,7 +148,7 @@ export class AsaasClient {
     } catch (error) {
       if (error instanceof AsaasProviderError) {
         console.error("[asaas-sandbox] provider_error", {
-          method: body ? "POST" : "GET",
+          method,
           path: path.split("?")[0],
           httpStatus: error.httpStatus,
           providerCode: error.providerCode,
@@ -160,7 +160,7 @@ export class AsaasClient {
       }
       // No provider response bodies, request bodies, PII or keys in errors/logs.
       console.error("[asaas-sandbox] provider_error", {
-        method: body ? "POST" : "GET",
+        method,
         path: path.split("?")[0],
         httpStatus,
         providerCode,

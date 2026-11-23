@@ -15,10 +15,11 @@ import {
   ShieldCheck,
   UserCheck,
 } from "lucide-react";
-import { BRAZIL_STATES } from "@/lib/constants";
+import { ASAAS_SANDBOX, BRAZIL_STATES, STORAGE } from "@/lib/constants";
 import { formatPhone, formatZip } from "@/lib/auth";
 import { deliveryFields, validateDeliveryValues } from "@/lib/checkout";
 import { currency } from "@/lib/currency";
+import { readSandboxAttempt, sandboxOrderId, saveSandboxAttempt } from "@/lib/sandbox-attempt";
 import {
   ORDER_STATUS_LABEL,
   ORDER_STOCK_STATUS_LABEL,
@@ -47,8 +48,8 @@ type AdminPaymentView = SandboxPaymentData & {
 type DeliveryFieldKey = "zip" | "address" | "number" | "complement" | "city" | "state";
 type AddressMode = "saved" | "edit" | "new";
 
-const ATTEMPT_STORAGE_KEY = "th-admin-asaas-sandbox-attempt";
-const SANDBOX_CHECKOUT_ORIGIN = "https://sandbox.asaas.com";
+const ATTEMPT_STORAGE_KEY = STORAGE.adminSandboxAttempt;
+const SANDBOX_CHECKOUT_ORIGIN = new URL(ASAAS_SANDBOX.checkoutBase).origin;
 
 function defaultDeliveryValue(
   customer: CustomerProfile | null,
@@ -72,8 +73,6 @@ function defaultDeliveryValue(
 }
 
 export function AdminSandboxCheckout() {
-  const cartItems = useCart((s) => s.items);
-  const clearCart = useCart((s) => s.clear);
   const accountHydrated = useAccount((s) => s.hydrated);
   const sessionPending = useAccount((s) => s.sessionPending);
   const customer = useAccount((s) => s.customer);
@@ -138,7 +137,7 @@ export function AdminSandboxCheckout() {
           const prod = rows.find((p) => p.id === cartMatch.productId)!;
           selectedProductIdRef.current = prod.id;
           setSelectedProductId(prod.id);
-          setSelectedVariant(cartMatch.variant || prod.variants[0] || "");
+          setSelectedVariant(prod.variants.find((variant) => variant === cartMatch.variant) ?? prod.variants[0] ?? "");
           setQuantity(Math.min(Math.max(1, cartMatch.quantity), prod.stock));
         } else if (!selectedProductIdRef.current || !rows.some((p) => p.id === selectedProductIdRef.current)) {
           const preferred =
@@ -208,14 +207,10 @@ export function AdminSandboxCheckout() {
           setRole(userRole);
         }
         if (userRole === "admin") {
-          const callbackId = new URLSearchParams(window.location.search).get("asaasOrder");
-          try {
-            const saved = JSON.parse(sessionStorage.getItem(ATTEMPT_STORAGE_KEY) ?? "null");
-            keyRef.current = callbackId ? null : saved?.key ?? null;
-            orderIdRef.current = callbackId ?? saved?.orderId ?? null;
-          } catch {
-            orderIdRef.current = callbackId;
-          }
+          const callbackId = sandboxOrderId(new URLSearchParams(window.location.search).get("asaasOrder"));
+          const saved = readSandboxAttempt(ATTEMPT_STORAGE_KEY);
+          keyRef.current = callbackId && callbackId !== saved.orderId ? null : saved.key;
+          orderIdRef.current = callbackId ?? saved.orderId;
           setHasSavedOrder(Boolean(orderIdRef.current));
           if (orderIdRef.current) {
             void loadOrder(orderIdRef.current).catch((err) =>
@@ -405,10 +400,7 @@ export function AdminSandboxCheckout() {
       }
 
       keyRef.current ??= crypto.randomUUID();
-      sessionStorage.setItem(
-        ATTEMPT_STORAGE_KEY,
-        JSON.stringify({ key: keyRef.current, orderId: null }),
-      );
+      saveSandboxAttempt(ATTEMPT_STORAGE_KEY, keyRef.current, null);
 
       const response = await fetch("/api/admin/asaas/checkout", {
         method: "POST",
@@ -433,14 +425,8 @@ export function AdminSandboxCheckout() {
       const data = body.data as AdminPaymentView;
       orderIdRef.current = data.order.id;
       setHasSavedOrder(true);
-      sessionStorage.setItem(
-        ATTEMPT_STORAGE_KEY,
-        JSON.stringify({ key: keyRef.current, orderId: data.order.id }),
-      );
       setPayment(data);
-      if (cartItems.some((i) => i.productId === selectedProduct.id)) {
-        clearCart();
-      }
+      saveSandboxAttempt(ATTEMPT_STORAGE_KEY, keyRef.current, data.order.id);
       await loadDashboard();
 
       if (method === "card" && data.order.checkoutUrl) {

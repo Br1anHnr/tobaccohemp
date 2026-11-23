@@ -138,6 +138,11 @@ export async function listCustomerAddresses(accountId: string, db: Db = pool()):
   return (result.rows as CustomerAddressRow[]).map(toAddress);
 }
 
+export async function lockCustomerAddressBook(accountId: string, db: Db) {
+  const result = await db.query("SELECT id FROM customer_accounts WHERE id = $1 FOR UPDATE", [accountId]);
+  if (!result.rowCount) missing();
+}
+
 export async function createCustomerAddress(
   accountId: string,
   input: CustomerAddressInput,

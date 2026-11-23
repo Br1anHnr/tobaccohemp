@@ -17,6 +17,7 @@ interface CartState {
   quantity: (id: string, variant: string | undefined, quantity: number) => void;
   remove: (id: string, variant?: string) => void;
   clear: () => void;
+  consume: (purchased: CartItem[]) => void;
   toggleFavorite: (id: string) => void;
 }
 export const useCart = create<CartState>()(
@@ -104,6 +105,14 @@ export const useCart = create<CartState>()(
           ),
         })),
       clear: () => set({ items: [], overlay: null }),
+      consume: (purchased) => set((state) => ({
+        items: state.items.flatMap((item) => {
+          const key = itemKey(item.productId, item.variant);
+          const count = purchased.find((line) => itemKey(line.productId, line.variant) === key)?.quantity ?? 0;
+          const quantity = item.quantity - count;
+          return quantity > 0 ? [{ ...item, quantity }] : [];
+        }),
+      })),
       toggleFavorite: (id) =>
         set((state) => ({
           favorites: state.favorites.includes(id)

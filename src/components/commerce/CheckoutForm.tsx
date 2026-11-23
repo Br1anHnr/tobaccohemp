@@ -1,6 +1,7 @@
 "use client";
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   AlertTriangle,
   Check,
@@ -17,8 +18,10 @@ import { useCart } from "@/store/cart-store";
 import { useAccount } from "@/store/account-store";
 import { useCatalog } from "@/store/catalog-store";
 import { formatPhone, formatZip, isValidPhone } from "@/lib/auth";
-import { BRAZIL_STATES } from "@/lib/constants";
+import { BRAZIL_STATES, STORAGE } from "@/lib/constants";
 import { currency } from "@/lib/currency";
+import { adminSessionChangedEvent, sessionExpiredEvent } from "@/lib/admin-service";
+import { readSandboxAttempt, sandboxOrderId } from "@/lib/sandbox-attempt";
 import {
   checkoutFields,
   contactFields,
@@ -79,6 +82,10 @@ export function CheckoutForm({
   const saveAddress = useAccount((s) => s.saveAddress);
   const updateAddress = useAccount((s) => s.updateAddress);
   const products = useCatalog((s) => s.products);
+  const callbackOrderId = sandboxOrderId(useSearchParams().get("asaasOrder"));
+  const adminLoginHref = `/admin/login?next=${encodeURIComponent(
+    callbackOrderId ? `/checkout?asaasOrder=${callbackOrderId}` : "/checkout",
+  )}`;
 
   const [overrides, setOverrides] = useState<Partial<Record<CheckoutFieldKey, string>>>({});
   const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null);
@@ -99,7 +106,9 @@ export function CheckoutForm({
   );
   const sandboxAvailable = sandboxMode !== "disabled";
   const [sandboxConfigReady, setSandboxConfigReady] = useState(initialSandboxAvailable);
-  const [activeSandboxPayment, setActiveSandboxPayment] = useState<SandboxPaymentData | null>(null);
+  const [sandboxConfigError, setSandboxConfigError] = useState(false);
+  const [sandboxPayment, setActiveSandboxPayment] = useState<SandboxPaymentData | null>(null);
+  const activeSandboxPayment = sandboxAvailable ? sandboxPayment : null;
   const [sandboxResetNotice, setSandboxResetNotice] = useState("");
 
   const handleSandboxPaymentChange = useCallback((next: SandboxPaymentData | null) => {
@@ -109,21 +118,37 @@ export function CheckoutForm({
 
   useEffect(() => {
     if (initialSandboxAvailable) return;
-    void fetch("/api/checkout/asaas/config", { cache: "no-store" })
-      .then((r) => r.json())
-      .then((body) => {
-        if (body.data?.enabled === true) {
-          setSandboxMode(body.data?.mode === "admin_sandbox" ? "admin_sandbox" : "preview_sandbox");
-        } else {
-          setSandboxMode("disabled");
-        }
-      })
-      .catch(() => {})
-      .finally(() => setSandboxConfigReady(true));
-  }, [initialSandboxAvailable]);
+    let controller: AbortController | undefined;
+    const check = async () => {
+      controller?.abort();
+      const current = new AbortController();
+      controller = current;
+      try {
+        const res = await fetch("/api/checkout/asaas/config", { cache: "no-store", signal: current.signal });
+        const body = await res.json();
+        if (!res.ok || typeof body.data?.enabled !== "boolean") throw new Error();
+        if (current.signal.aborted) return;
+        const mode = body.data.mode;
+        setSandboxMode(body.data.enabled && (mode === "admin_sandbox" || mode === "preview_sandbox") ? mode : "disabled");
+        setSandboxConfigError(false);
+      } catch {
+        if (current.signal.aborted) return;
+        setSandboxMode("disabled");
+        setSandboxConfigError(true);
+      } finally {
+        if (!current.signal.aborted) setSandboxConfigReady(true);
+      }
+    };
+    void check();
+    const events = ["focus", "pageshow", adminSessionChangedEvent, sessionExpiredEvent];
+    events.forEach((event) => window.addEventListener(event, check));
+    return () => {
+      controller?.abort();
+      events.forEach((event) => window.removeEventListener(event, check));
+    };
+  }, [callbackOrderId, initialSandboxAvailable]);
 
   const syncedCustomerRef = useRef<string | null>(null);
-  const [addressSyncWarning, setAddressSyncWarning] = useState("");
   useEffect(() => {
     if (!accountHydrated || !customer) {
       syncedCustomerRef.current = null;
@@ -131,33 +156,20 @@ export function CheckoutForm({
     }
     if (syncedCustomerRef.current === customer.email) return;
     syncedCustomerRef.current = customer.email;
-    void refreshAddresses().then((result) => {
-      if (!result.ok && result.code !== "unavailable") {
-        setAddressSyncWarning(result.message);
-      } else {
-        setAddressSyncWarning("");
-      }
-    });
+    void refreshAddresses();
   }, [accountHydrated, customer, refreshAddresses]);
-
-  const activeAddressesError = addressesError && !addressSyncWarning ? "" : addressSyncWarning;
-
-  let hasAsaasLookup = false;
-  if (cartHydrated && accountHydrated && typeof window !== "undefined") {
-    hasAsaasLookup = new URLSearchParams(window.location.search).has("asaasOrder");
-    if (!hasAsaasLookup) {
-      try {
-        hasAsaasLookup = Boolean(sessionStorage.getItem("th-asaas-sandbox-attempt"));
-      } catch {
-        /* Ignore storage restrictions. */
-      }
-    }
-  }
 
   if (!cartHydrated || !accountHydrated || sessionPending || !sandboxConfigReady) {
     return <p role="status">Carregando sua seleção…</p>;
   }
 
+  const hasAsaasLookup = Boolean(callbackOrderId || readSandboxAttempt(STORAGE.storefrontSandboxAttempt).orderId);
+  const adminAccess = (
+    <Link className="text-link" href={adminLoginHref}>Acesso administrativo</Link>
+  );
+  const accessMessage = sandboxConfigError
+    ? "Não foi possível verificar o acesso administrativo. Entre novamente para tentar."
+    : "Entre com sua sessão administrativa para continuar.";
   const showEmpty = !items.length && !(sandboxAvailable && (hasAsaasLookup || Boolean(activeSandboxPayment)));
   if (showEmpty) {
     return (
@@ -167,7 +179,9 @@ export function CheckoutForm({
             <p>{sandboxResetNotice}</p>
           </div>
         )}
-        <EmptyState title="Escolha seus essenciais primeiro." />
+        {hasAsaasLookup || sandboxConfigError ? (
+          <div className="checkout-test-note" role="status"><p>{accessMessage} {adminAccess}</p></div>
+        ) : <EmptyState title="Escolha seus essenciais primeiro." />}
       </>
     );
   }
@@ -299,7 +313,7 @@ export function CheckoutForm({
         complement: deliveryValues.complement.trim(),
         city: deliveryValues.city.trim(),
         state: deliveryValues.state.trim().toUpperCase(),
-        isDefault: true,
+        isDefault: addressMode === "edit" ? activeSavedAddress?.isDefault : true,
       };
       const res =
         addressMode === "edit" && activeSavedAddress
@@ -531,7 +545,7 @@ export function CheckoutForm({
     </div>
   );
 
-  const addressAlertText = addressSaveError || activeAddressesError;
+  const addressAlertText = addressSaveError || addressesError;
   const addressAlertBox = addressAlertText && (
     <div className="error-summary" role="alert" tabIndex={-1} ref={alertRef}>
       <strong>
@@ -544,7 +558,6 @@ export function CheckoutForm({
           className="text-link checkout-inline-action"
           onClick={() => {
             setAddressSaveError("");
-            setAddressSyncWarning("");
             void refreshAddresses();
           }}
         >
@@ -726,6 +739,7 @@ export function CheckoutForm({
 
           <AsaasSandboxCheckout
             mode={sandboxMode === "admin_sandbox" ? "admin_sandbox" : "preview_sandbox"}
+            callbackOrderId={callbackOrderId}
             beforeCreate={validateAndSaveSandboxDelivery}
             onPaymentChange={handleSandboxPaymentChange}
             onResetNotice={setSandboxResetNotice}
@@ -868,7 +882,9 @@ export function CheckoutForm({
                 Ver meus pedidos
               </ButtonLink>
             )}
+            {adminAccess}
           </div>
+          {(sandboxConfigError || callbackOrderId) && <p role="status">{accessMessage}</p>}
         </fieldset>
       </div>
       {summaryPanel}

@@ -14,6 +14,7 @@ import { POST as adminCheckoutRoute } from "../../src/app/api/admin/asaas/checko
 import { POST as checkout } from "../../src/app/api/checkout/asaas/route";
 import { GET as lookup } from "../../src/app/api/checkout/asaas/[id]/route";
 import { GET as customerOrdersRoute } from "../../src/app/api/auth/orders/route";
+import { POST as createAddressRoute } from "../../src/app/api/auth/addresses/route";
 
 test.describe.configure({ mode: "serial" });
 type Payment = Record<string, unknown>;
@@ -30,6 +31,13 @@ const mockFetch: typeof fetch = async (input, init) => {
   const url = String(input); requests.push({ url, init });
   expect(url.startsWith(ASAAS_SANDBOX_BASE + "/")).toBe(true);
   expect(init?.redirect).toBe("error");
+  const parsed = new URL(url);
+  const id = parsed.pathname.split("/").at(-1)!;
+  if (init?.method === "POST" && id === "cancel") return Response.json({ id: parsed.pathname.split("/").at(-2) });
+  if (init?.method === "DELETE" && payments.has(id)) {
+    payments.get(id)!.deleted = true;
+    return Response.json({ id, deleted: true });
+  }
   if (init?.method === "POST") {
     postCount++;
     if (failure === "before") throw new Error("synthetic network failure");
@@ -45,8 +53,6 @@ const mockFetch: typeof fetch = async (input, init) => {
     if (failure === "qr400") return Response.json({ errors: [{ code: "invalid_action", description: "SECRET_SHOULD_NOT_LEAK" }] }, { status: 400 });
     return Response.json({ encodedImage: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", payload: "000201-SYNTHETIC-PIX", expirationDate: "2026-11-23 23:59:59" });
   }
-  const parsed = new URL(url);
-  const id = parsed.pathname.split("/").at(-1)!;
   if (id === "payments") return Response.json({ data: [...payments.values()].filter(p => (!parsed.searchParams.get("externalReference") || p.externalReference === parsed.searchParams.get("externalReference")) && (!parsed.searchParams.get("checkoutSession") || p.checkoutSession === parsed.searchParams.get("checkoutSession"))), hasMore: false });
   return payments.has(id) ? Response.json(payments.get(id)) : new Response("missing", { status: 404 });
 };
@@ -79,6 +85,27 @@ test("HTTP webhook rejects missing/wrong auth and malformed payload; unknown eve
   expect(response.status).toBe(200); expect(response.headers.get("location")).toBeNull();
   expect((await response.json()).result).toBe("ignored_unknown");
   expect((await webhook(request("/api/webhooks/asaas",event("unknown","NEW_FUTURE_EVENT",{}), { "asaas-access-token": token }))).status).toBe(200);
+});
+
+test("webhook registration suffixes deduplicate concurrent and legacy deliveries", async () => {
+  const deliveries = await Promise.all(["&25741689", "&25741690"].map(suffix =>
+    processAsaasEvent(event(`registration${suffix}`, "NEW_FUTURE_EVENT", {}), client),
+  ));
+  expect(deliveries.map(row => row.result).sort()).toEqual(["duplicate", "ignored_unknown"]);
+  await pool().query("INSERT INTO asaas_sandbox_events(event_id,event_type,result) VALUES('evt_legacy&123','NEW_FUTURE_EVENT','ignored_unknown')");
+  expect((await processAsaasEvent(event("legacy&456", "NEW_FUTURE_EVENT", {}), client)).result).toBe("duplicate");
+});
+
+test("concurrent saves reuse one address and preserve a single default", async () => {
+  const headers = { Origin: origin, Cookie: `${customerSessionCookie}=${account.token}` };
+  const address = { label: "Casa", zip: "12500000", street: "Rua Sintética", number: "10", city: "Guaratinguetá", state: "SP", isDefault: true };
+  const responses = await Promise.all([
+    createAddressRoute(request("/api/auth/addresses", address, headers)),
+    createAddressRoute(request("/api/auth/addresses", { ...address, label: "Principal" }, headers)),
+  ]);
+  expect(responses.map(r => r.status)).toEqual([201, 201]);
+  const rows = await pool().query("SELECT is_default FROM customer_addresses WHERE account_id=$1 AND street=$2", [account.id, address.street]);
+  expect(rows.rows).toEqual([{ is_default: true }]);
 });
 
 test("migration upgrades published 18ae2b5 schema and preserves existing inventory", async () => {
@@ -337,6 +364,41 @@ test("adminCancelSandboxAttempt releases uncertain stock when unpaid and blocks 
     status: 409,
     code: "CANNOT_CANCEL_SETTLED",
   });
+});
+
+test("closes provider Pix and card resources before releasing stock", async () => {
+  for (const method of ["pix", "card"] as const) {
+    const pending = await create(`provider-cancel-${method}`, method);
+    const reserved = await stock();
+    const response = await adminCancelSandboxAttempt(pending.order.id, "admin-test", undefined, client);
+    expect(response.order.status).toBe("canceled");
+    expect(await stock()).toBe(reserved + 1);
+    const ref = pending.order.providerReference;
+    expect(requests.some(({ url, init }) => method === "pix"
+      ? init?.method === "DELETE" && url.endsWith(`/payments/${ref}`)
+      : init?.method === "POST" && url.endsWith(`/checkouts/${ref}/cancel`))).toBe(true);
+  }
+});
+
+test("releases an elapsed card reservation when the provider has no payment and the webhook was missed", async () => {
+  const pending = await create("card-expiration-fallback", "card");
+  const reserved = await stock();
+  await pool().query("UPDATE asaas_sandbox_attempts SET updated_at=now()-interval '33 minutes' WHERE order_id=$1", [pending.order.id]);
+  const view = await sandboxPaymentView(pending.order.id, account.id, client);
+  expect(view.order.status).toBe("expired");
+  expect(await stock()).toBe(reserved + 1);
+});
+
+test("checks explicit variants against the isolated product and defaults legacy cart lines", async () => {
+  await pool().query("UPDATE products SET variants=ARRAY['Preto'] WHERE id='sandbox-accessory'");
+  try {
+    const payload = input("variant-unavailable");
+    await expect(createSandboxPayment({ ...payload, items: [{ ...payload.items[0], variant: "Vermelho" }] }, account.id, origin, client))
+      .rejects.toMatchObject({ code: "INVALID_VARIANT" });
+    expect((await create("legacy-cart-no-variant")).order.items[0].variant).toBe("Preto");
+  } finally {
+    await pool().query("UPDATE products SET variants=ARRAY[]::text[] WHERE id='sandbox-accessory'");
+  }
 });
 
 test("sanitized provider diagnostics persist without leaking bodies and clear on reconcile; empty card externalReference reconciles", async () => {

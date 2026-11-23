@@ -96,7 +96,9 @@ export async function createCustomerAccountAddress(
   value: unknown,
   db: Db = pool(),
 ): Promise<{ address: CustomerAddress; addresses: CustomerAddress[] }> {
-  const address = await accounts.createCustomerAddress(accountId, addressInput(value), db);
+  const input = addressInput(value);
+  await accounts.lockCustomerAddressBook(accountId, db);
+  const address = await accounts.createCustomerAddress(accountId, input, db);
   const addresses = await accounts.listCustomerAddresses(accountId, db);
   return { address, addresses };
 }
@@ -107,7 +109,9 @@ export async function updateCustomerAccountAddress(
   value: unknown,
   db: Db = pool(),
 ): Promise<{ address: CustomerAddress; addresses: CustomerAddress[] }> {
-  const address = await accounts.updateCustomerAddress(accountId, addressId, addressInput(value), db);
+  const input = addressInput(value);
+  await accounts.lockCustomerAddressBook(accountId, db);
+  const address = await accounts.updateCustomerAddress(accountId, addressId, input, db);
   const addresses = await accounts.listCustomerAddresses(accountId, db);
   return { address, addresses };
 }
@@ -117,6 +121,7 @@ export async function deleteCustomerAccountAddress(
   addressId: string,
   db: Db = pool(),
 ): Promise<CustomerAddress[]> {
+  await accounts.lockCustomerAddressBook(accountId, db);
   await accounts.deleteCustomerAddress(accountId, addressId, db);
   return accounts.listCustomerAddresses(accountId, db);
 }

@@ -390,7 +390,7 @@ export async function createOrder(
 
     // Lock product rows first in deterministic order to avoid deadlocks.
     const productsRes = await tx.query(
-      `SELECT id, sku, name, category_slug, price_cents, active, archived_at, tags, created_at
+      `SELECT id, sku, name, category_slug, price_cents, active, archived_at, tags, variants
          FROM products
         WHERE id = ANY($1::text[])
         ORDER BY id ASC
@@ -409,6 +409,7 @@ export async function createOrder(
         active: boolean;
         archived: boolean;
         tags: string[];
+        variants: string[];
       }
     >();
 
@@ -423,6 +424,7 @@ export async function createOrder(
         active: r.active === true,
         archived: r.archived_at !== null,
         tags: asStringArray(r.tags),
+        variants: asStringArray(r.variants),
       });
     }
 
@@ -458,6 +460,9 @@ export async function createOrder(
 
     const resolvedEntries = input.items.map((item) => {
       const dbProduct = productById.get(item.productId);
+      if (sandbox && item.variant && dbProduct && !dbProduct.variants.includes(item.variant)) {
+        throw new AdminError(422, "INVALID_VARIANT", `Variação indisponível para "${dbProduct.name}".`);
+      }
       const subject = dbProduct
         ? {
             id: dbProduct.id,
@@ -471,7 +476,9 @@ export async function createOrder(
           }
         : undefined;
       return {
-        requested: item,
+        requested: sandbox && !item.variant && dbProduct?.variants[0]
+          ? { ...item, variant: dbProduct.variants[0] }
+          : item,
         dbProduct,
         subject,
       };

@@ -8,7 +8,7 @@ export const POST = adminRoute(async request => {
   await invalidateSession(request.cookies.get(sessionCookie)?.value);
   const response = NextResponse.json({ data: user });
   response.cookies.set(sessionCookie, token, {
-    httpOnly: true, sameSite: "strict", path: "/", maxAge: sessionSeconds,
+    httpOnly: true, sameSite: "lax", path: "/", maxAge: sessionSeconds,
     secure: isSecureRequest(request),
   });
   return response;

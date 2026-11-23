@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
+import { ASAAS_SANDBOX } from "@/lib/constants";
 import type { OrderStatus } from "@/shared/contracts/orders";
 import { sandboxPool, type Db } from "@/shared/server/database";
 import { AdminError } from "@/shared/server/validation";
@@ -15,6 +16,7 @@ type Attempt = {
   state: string;
   provider_id: string | null;
   payment_id: string | null;
+  updated_at: Date;
   last_provider_status?: string | null;
   last_error_code?: string | null;
   last_error_status?: number | null;
@@ -113,7 +115,7 @@ export async function createSandboxPayment(
       const callback = `${origin}${callbackPath}?asaasOrder=${encodeURIComponent(order.id)}`;
       const response = input.paymentMethod === "pix"
         ? await client.request("/payments", { customer: config.customer, billingType: "PIX", value: order.totalCents / 100, dueDate: new Date().toISOString().slice(0,10), externalReference: reference, description: "Acessórios sintéticos — teste Sandbox" })
-        : await client.request("/checkouts", { billingTypes: ["CREDIT_CARD"], chargeTypes: ["DETACHED"], minutesToExpire: 30, externalReference: reference,
+        : await client.request("/checkouts", { billingTypes: ["CREDIT_CARD"], chargeTypes: ["DETACHED"], minutesToExpire: ASAAS_SANDBOX.checkoutMinutes, externalReference: reference,
           callback: { successUrl: callback, cancelUrl: callback, expiredUrl: callback },
           items: order.items.map(i => ({ name: i.productName, quantity: i.quantity, value: i.unitPriceCents / 100 })) });
       const id = resourceId(response.id);
@@ -164,12 +166,18 @@ function statusFor(payment: Record<string, unknown>): OrderStatus | null {
     if ((Array.isArray(payment.refunds) && payment.refunds.length) || payment.chargeback) return null;
     return "paid";
   }
-  if (payment.status === "OVERDUE") return "expired";
   if (payment.deleted === true) return "canceled";
+  if (payment.status === "OVERDUE") return "expired";
   return null;
 }
 
-async function reconcile(tx: PoolClient, a: Attempt, client: AsaasClient, candidatePayment?: string) {
+async function reconcile(
+  tx: PoolClient,
+  a: Attempt,
+  client: AsaasClient,
+  candidatePayment?: string,
+  recoverExpiredCheckout = false,
+) {
   const order = await getOrderDetail(a.order_id, tx);
   let payment: Record<string, unknown> | undefined;
   if (a.payment_id || candidatePayment) {
@@ -182,7 +190,15 @@ async function reconcile(tx: PoolClient, a: Attempt, client: AsaasClient, candid
     if (list.length > 1) throw new AdminError(409,"ASAAS_MULTIPLE_PAYMENTS","Múltiplas cobranças exigem revisão.");
     if (list.length) payment = await client.request(`/payments/${resourceId(list[0].id)}`);
   }
-  if (!payment) return;
+  if (!payment) {
+    // Asaas does not expose a GET for checkout sessions. Wait beyond the configured
+    // provider lifetime before releasing a known card session without a payment.
+    if (recoverExpiredCheckout && a.method === "card" && a.provider_id && order.status === "pending_payment" &&
+        Date.now() >= a.updated_at.getTime() + (ASAAS_SANDBOX.checkoutMinutes + 2) * 60_000) {
+      await reconcileSandboxOrder(tx, a.order_id, "expired");
+    }
+    return;
+  }
   verifiedPayment(payment, a, order.totalCents);
   const providerId = a.method === "pix" ? resourceId(payment.id) : resourceId(payment.checkoutSession);
   await tx.query("UPDATE asaas_sandbox_attempts SET provider_id=$2,payment_id=$3,state='ready',last_provider_status=$4,last_error_code=NULL,last_error_status=NULL,last_error_at=NULL,updated_at=now() WHERE order_id=$1", [a.order_id,providerId,payment.id,String(payment.status)]);
@@ -225,6 +241,9 @@ export async function adminCancelSandboxAttempt(
       );
       return { order: currentOrder };
     }
+    if (a.state === "creating" || (a.method === "card" && a.state !== "prepared" && !a.provider_id)) {
+      throw new AdminError(409, "CHECKOUT_PENDING_RECONCILIATION", "Aguarde a conciliação da tentativa antes de cancelar.");
+    }
 
     const paymentsToCheck: Record<string, unknown>[] = [];
     if (a.payment_id) {
@@ -248,6 +267,7 @@ export async function adminCancelSandboxAttempt(
     }
 
     const settled = paymentsToCheck.some((payment) => {
+      verifiedPayment(payment, a, currentOrder.totalCents);
       const status = String(payment.status ?? "");
       const hasRefund = Array.isArray(payment.refunds) && payment.refunds.length > 0;
       const hasChargeback = Boolean(payment.chargeback);
@@ -263,6 +283,16 @@ export async function adminCancelSandboxAttempt(
         "PAYMENT_ALREADY_CONFIRMED",
         "Cobrança já confirmada ou em estorno no Asaas; execute a reconciliação.",
       );
+    }
+
+    if (a.method === "card" && a.provider_id) {
+      await client.request(`/checkouts/${resourceId(a.provider_id)}/cancel`, undefined, "POST");
+    } else if (a.method === "pix") {
+      for (const payment of paymentsToCheck) {
+        if (payment.deleted !== true) {
+          await client.request(`/payments/${resourceId(payment.id)}`, undefined, "DELETE");
+        }
+      }
     }
 
     const canceled = await cancelSandboxOrder(tx, id, adminId, reason);
@@ -288,7 +318,7 @@ export async function sandboxPaymentView(
   if (!result.rows.length) throw new AdminError(404, "NOT_FOUND", "Pedido Sandbox não encontrado.");
   let warning: string | undefined;
   let diagnostic: SandboxDiagnostic | undefined;
-  try { await transaction(async tx => { const a = await attempt(tx, id); await reconcile(tx, a, client); }); }
+  try { await transaction(async tx => { const a = await attempt(tx, id); await reconcile(tx, a, client, undefined, true); }); }
   catch (error) {
     if (!(error instanceof AdminError)) throw error;
     warning = error.code;
@@ -345,9 +375,16 @@ export async function processAsaasEvent(value: unknown, client = new AsaasClient
   sandboxConfig();
   const event = parseAsaasEvent(value);
   return transaction(async tx => {
+    // Asaas can deliver the same event through multiple registrations with a numeric suffix per registration.
+    const canonicalId = event.eventId.replace(/&\d+$/, "");
+    await tx.query("SELECT pg_advisory_xact_lock(hashtext('th-asaas-event'), hashtext($1))", [canonicalId]);
+    const previous = await tx.query(
+      "SELECT 1 FROM asaas_sandbox_events WHERE event_id=$1 OR (starts_with(event_id,$1 || '&') AND substring(event_id FROM length($1) + 2) ~ '^[0-9]+$') LIMIT 1",
+      [canonicalId],
+    );
+    if (previous.rows.length) return { received: true, result: "duplicate" };
     // The insert and state/inventory changes commit together; transient failures rollback.
-    const inserted = await tx.query("INSERT INTO asaas_sandbox_events(event_id,event_type,resource_id,result) VALUES($1,$2,$3,'processing') ON CONFLICT DO NOTHING RETURNING event_id", [event.eventId,event.eventType,event.resourceId]);
-    if (!inserted.rows.length) return { received: true, result: "duplicate" };
+    await tx.query("INSERT INTO asaas_sandbox_events(event_id,event_type,resource_id,result) VALUES($1,$2,$3,'processing')", [canonicalId,event.eventType,event.resourceId]);
     let result = "ignored_unknown";
     let orderId: string | null = null;
     if (event.supported) {
@@ -382,7 +419,7 @@ export async function processAsaasEvent(value: unknown, client = new AsaasClient
         }
       }
     }
-    await tx.query("UPDATE asaas_sandbox_events SET result=$2,order_id=$3 WHERE event_id=$1",[event.eventId,result,orderId]);
+    await tx.query("UPDATE asaas_sandbox_events SET result=$2,order_id=$3 WHERE event_id=$1",[canonicalId,result,orderId]);
     return { received: true, result };
   });
 }

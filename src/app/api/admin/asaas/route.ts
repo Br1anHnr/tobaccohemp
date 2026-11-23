@@ -7,4 +7,4 @@ export const dynamic = "force-dynamic";
 export const GET = adminRoute(async () => {
   await ensureSandboxSchema();
   return sandboxDashboard();
-}, { role: "operator" });
+});

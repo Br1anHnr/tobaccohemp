@@ -12,6 +12,7 @@ export const STORE = {
 export const ASAAS_SANDBOX = {
   apiBase: "https://api-sandbox.asaas.com/v3",
   checkoutBase: "https://sandbox.asaas.com/checkoutSession/show",
+  checkoutMinutes: 30,
   notice: "Asaas Sandbox · teste sintético sem valor financeiro",
 };
 export const STORAGE = {
@@ -19,6 +20,8 @@ export const STORAGE = {
   age: "th-age-confirmed",
   favorites: "th-favorites-v1",
   order: "th-demo-order",
+  storefrontSandboxAttempt: "th-asaas-sandbox-attempt",
+  adminSandboxAttempt: "th-admin-asaas-sandbox-attempt",
   // Stores only the demo-mode flag in sessionStorage; never credentials.
   demoAccount: "th-demo-account",
 };

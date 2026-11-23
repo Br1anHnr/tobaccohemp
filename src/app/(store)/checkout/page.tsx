@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { Container } from "@/components/layout/Container";
 import { PageIntro } from "@/components/layout/PageIntro";
 import { CheckoutForm } from "@/components/commerce/CheckoutForm";
@@ -18,7 +19,9 @@ export default function Page() {
           { label: "Checkout" },
         ]}
       />
-      <CheckoutForm initialSandboxAvailable={sandboxEnabled()} />
+      <Suspense fallback={<p role="status">Carregando sua seleção…</p>}>
+        <CheckoutForm initialSandboxAvailable={sandboxEnabled()} />
+      </Suspense>
     </Container>
   );
 }

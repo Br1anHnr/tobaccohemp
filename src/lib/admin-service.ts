@@ -13,6 +13,7 @@ import type {
 } from "@/shared/contracts/orders";
 
 export const sessionExpiredEvent = "th-admin-session-expired";
+export const adminSessionChangedEvent = "th-admin-session-changed";
 
 export class AdminApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
@@ -35,10 +36,18 @@ async function request<T>(path: string, options: RequestInit = {}, expire = true
 }
 
 export const fetchAdminSession = () => request<AdminUser | null>(adminEndpoints.session);
-export const loginAdmin = (input: LoginInput) => request<AdminUser>(adminEndpoints.login, {
-  method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
-}, false);
-export const logoutAdmin = () => request<null>(adminEndpoints.logout, { method: "POST" });
+export async function loginAdmin(input: LoginInput) {
+  const user = await request<AdminUser>(adminEndpoints.login, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(input),
+  }, false);
+  window.dispatchEvent(new Event(adminSessionChangedEvent));
+  return user;
+}
+
+export async function logoutAdmin() {
+  await request<null>(adminEndpoints.logout, { method: "POST" });
+  window.dispatchEvent(new Event(adminSessionChangedEvent));
+}
 
 export async function fetchCustomers(): Promise<Customer[]> {
   const rows = await request<WireCustomer[]>(adminEndpoints.customers);

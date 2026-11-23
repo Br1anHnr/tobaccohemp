@@ -28,20 +28,22 @@ function normalizeDbIdentity(connectionString: string): string {
   if (!trimmed) return "";
   try {
     const parsed = new URL(trimmed);
-    const host = parsed.hostname.toLowerCase().replace(/-pooler(?=\.)/, "");
-    const port = parsed.port || (parsed.protocol.startsWith("postgres") ? "5432" : "");
-    const dbPath = parsed.pathname.replace(/\/+$/, "").toLowerCase();
+    if (!["postgresql:", "postgres:"].includes(parsed.protocol) || !parsed.hostname || parsed.pathname.length <= 1) return "";
+    const host = parsed.hostname.toLowerCase().replace(/\.$/, "").replace(/-pooler(?=\.)/, "");
+    const port = parsed.port || "5432";
+    const dbPath = decodeURIComponent(parsed.pathname).replace(/\/+$/, "").toLowerCase();
     return `${host}:${port}${dbPath}`;
   } catch {
-    return trimmed;
+    return "";
   }
 }
 
 export function hasIsolatedSandboxDatabase(): boolean {
   const sandboxUrl = process.env.ASAAS_SANDBOX_DATABASE_URL?.trim() ?? "";
   const primaryUrl = process.env.DATABASE_URL?.trim() ?? "";
-  if (!sandboxUrl || !primaryUrl) return false;
-  return normalizeDbIdentity(sandboxUrl) !== normalizeDbIdentity(primaryUrl);
+  const sandbox = normalizeDbIdentity(sandboxUrl);
+  const primary = normalizeDbIdentity(primaryUrl);
+  return Boolean(sandbox && primary && sandbox !== primary);
 }
 
 /** Dedicated PostgreSQL pool for isolated Asaas Sandbox tests; never shares the commercial production DB. */

@@ -44,6 +44,7 @@ interface AccountState {
 
 let inflightSession: Promise<void> | null = null;
 let inflightAddresses: Promise<AuthResult> | null = null;
+let addressRevision = 0;
 
 function applyAddresses(
   customer: CustomerProfile,
@@ -136,18 +137,15 @@ export const useAccount = create<AccountState>()(
           };
         }
         if (inflightAddresses) return inflightAddresses;
+        const revision = addressRevision;
         set({ addressesLoading: true, addressesError: null });
         inflightAddresses = authClient
           .fetchAddresses()
           .then((result): AuthResult => {
             const latest = get().customer;
-            if (!latest) {
+            if (latest?.email !== current.email || revision !== addressRevision) {
               set({ addressesLoading: false });
-              return {
-                ok: false,
-                code: "unauthorized",
-                message: "Entre na sua conta para carregar seus endereços.",
-              };
+              return { ok: true };
             }
             if (result.ok && Array.isArray(result.addresses)) {
               const next = applyAddresses(latest, result.addresses);
@@ -186,7 +184,9 @@ export const useAccount = create<AccountState>()(
           })
           .catch((): AuthResult => {
             const message = "Não foi possível carregar seus endereços salvos.";
-            set({ addressesLoading: false, addressesError: message });
+            if (get().customer?.email === current.email && revision === addressRevision) {
+              set({ addressesLoading: false, addressesError: message });
+            }
             return { ok: false, code: "network", message };
           })
           .finally(() => {
@@ -197,6 +197,7 @@ export const useAccount = create<AccountState>()(
       signIn: async (input) => {
         const result = await authClient.signIn(input);
         if (result.ok && result.account) {
+          addressRevision++;
           set({
             customer: result.account,
             profile: result.account,
@@ -213,6 +214,7 @@ export const useAccount = create<AccountState>()(
       signUp: async (input) => {
         const result = await authClient.signUp(input);
         if (result.ok && result.account) {
+          addressRevision++;
           set({
             customer: result.account,
             profile: result.account,
@@ -228,6 +230,7 @@ export const useAccount = create<AccountState>()(
       },
       signOut: async () => {
         await authClient.signOut();
+        addressRevision++;
         set({
           customer: null,
           profile: demoProfile,
@@ -260,8 +263,10 @@ export const useAccount = create<AccountState>()(
           };
         }
         const result = await authClient.saveAddress(input);
+        const latest = get().customer;
+        if (latest?.email !== current.email) return result;
         if (result.ok && Array.isArray(result.addresses)) {
-          const latest = get().customer ?? current;
+          addressRevision++;
           const next = applyAddresses(latest, result.addresses);
           set({
             customer: next,
@@ -298,8 +303,10 @@ export const useAccount = create<AccountState>()(
           };
         }
         const result = await authClient.updateAddress(id, input);
+        const latest = get().customer;
+        if (latest?.email !== current.email) return result;
         if (result.ok && Array.isArray(result.addresses)) {
-          const latest = get().customer ?? current;
+          addressRevision++;
           const next = applyAddresses(latest, result.addresses);
           set({
             customer: next,
@@ -337,8 +344,10 @@ export const useAccount = create<AccountState>()(
           };
         }
         const result = await authClient.deleteAddress(id);
+        const latest = get().customer;
+        if (latest?.email !== current.email) return result;
         if (result.ok && Array.isArray(result.addresses)) {
-          const latest = get().customer ?? current;
+          addressRevision++;
           const next = applyAddresses(latest, result.addresses);
           set({
             customer: next,

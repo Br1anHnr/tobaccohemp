@@ -6,6 +6,6 @@ export const dynamic = "force-dynamic";
 export const POST = adminRoute(async request => {
   await invalidateSession(request.cookies.get(sessionCookie)?.value);
   const response = NextResponse.json({ data: null });
-  response.cookies.set(sessionCookie, "", { httpOnly: true, sameSite: "strict", path: "/", maxAge: 0, secure: isSecureRequest(request) });
+  response.cookies.set(sessionCookie, "", { httpOnly: true, sameSite: "lax", path: "/", maxAge: 0, secure: isSecureRequest(request) });
   return response;
 });

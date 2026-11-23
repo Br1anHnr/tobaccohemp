@@ -86,7 +86,7 @@ test.beforeEach(async ({ page }) => {
       }),
     );
   });
-  await page.route("**/api/checkout/asaas/config", (route) => route.fulfill({ json: { data: { enabled: true } } }));
+  await page.route("**/api/checkout/asaas/config", (route) => route.fulfill({ json: { data: { enabled: true, mode: "preview_sandbox" } } }));
   await page.route("**/api/auth/addresses", (route) => route.fulfill({ json: { data: syntheticAccount.addresses } }));
   await page.route("**/api/auth/login", (route) =>
     route.fulfill({
@@ -510,4 +510,48 @@ test("Admin-authenticated storefront /checkout runs Asaas Sandbox with saved add
   await page.getByRole("button", { name: "Cancelar e liberar estoque" }).click();
   expect(cancelCalls).toBe(1);
   await expect(page.getByText("Cancelado · R$ 39,90")).toBeVisible();
+});
+
+test("Admin login returns to the storefront and Pix is recoverable without sessionStorage", async ({ page }) => {
+  let authenticated = false;
+  let requests = 0;
+  const admin = { id: "synthetic-admin", name: "Admin Sintético", email: "admin@example.test", role: "admin" };
+  await page.addInitScript(() => {
+    const original = Storage.prototype.setItem;
+    Storage.prototype.setItem = function (name, value) {
+      if (name === "th-asaas-sandbox-attempt") throw new DOMException("Storage blocked", "SecurityError");
+      original.call(this, name, value);
+    };
+  });
+  await page.route("**/api/auth/session", (route) => route.fulfill({ json: { data: null } }));
+  await page.route("**/api/admin/auth/login", (route) => {
+    authenticated = true;
+    return route.fulfill({ json: { data: admin } });
+  });
+  await page.route("**/api/checkout/asaas/config", (route) => route.fulfill({ json: { data: {
+    enabled: authenticated, mode: authenticated ? "admin_sandbox" : "disabled",
+  } } }));
+  await page.route("**/api/admin/asaas/checkout", (route) => {
+    requests++;
+    return route.fulfill({ json: { data: receipt("pix") } });
+  });
+  await page.route("**/api/admin/asaas/orders/sandbox-ui-order", (route) =>
+    route.fulfill({ json: { data: receipt("pix") } }),
+  );
+
+  await page.goto("/checkout");
+  await page.getByRole("button", { name: "Sim, tenho 18+" }).click();
+  await expect(page.getByText("Pagamentos online indisponíveis para pedidos comerciais.")).toBeVisible();
+  await expect(page.locator("#asaas-method-pix")).toHaveCount(0);
+  await page.getByRole("link", { name: "Acesso administrativo" }).click();
+  await page.locator("#admin-email").fill(admin.email);
+  await page.locator("#admin-password").fill("Synthetic123");
+  await page.getByRole("button", { name: "Entrar", exact: true }).click();
+  await expect(page).toHaveURL(/\/checkout$/);
+  await page.getByRole("button", { name: "Finalizar pedido" }).click();
+  await expect(page).toHaveURL(/\/checkout\?asaasOrder=sandbox-ui-order$/);
+  await expect(page.getByRole("img", { name: "QR Code Pix do pedido" })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Pedido TH-SANDBOX-UI" })).toBeVisible();
+  expect(requests).toBe(1);
 });

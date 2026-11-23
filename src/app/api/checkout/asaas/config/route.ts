@@ -27,7 +27,10 @@ export async function GET(request?: NextRequest) {
           );
         }
       } catch {
-        // Fail closed when admin session lookup is unavailable.
+        return NextResponse.json(
+          { error: { message: "Não foi possível verificar a sessão administrativa." } },
+          { status: 503, headers },
+        );
       }
     }
   }
