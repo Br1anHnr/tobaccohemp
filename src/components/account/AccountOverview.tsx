@@ -1,13 +1,11 @@
 "use client";
-import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Heart, Package, ShoppingBag } from "lucide-react";
 import { demoOrders } from "@/data/account-demo";
 import { formatPhone, formatZip } from "@/lib/auth";
 import { cartCount, useCart } from "@/store/cart-store";
 import { useAccount } from "@/store/account-store";
-import type { CustomerOrderDetail } from "@/modules/orders";
-import { fetchCustomerOrdersClient, OrderCard, RealOrderCard } from "./OrderHistory";
+import { OrderCard, RealOrderCard, useCustomerOrders } from "./OrderHistory";
 
 export function AccountOverview() {
   const customer = useAccount((s) => s.customer);
@@ -15,18 +13,7 @@ export function AccountOverview() {
   const items = useCart((s) => s.items);
   const favorites = useCart((s) => s.favorites);
   const open = useCart((s) => s.setOverlay);
-  const [realOrders, setRealOrders] = useState<CustomerOrderDetail[]>([]);
-
-  useEffect(() => {
-    if (!customer) return;
-    let cancelled = false;
-    void fetchCustomerOrdersClient().then((rows) => {
-      if (!cancelled) setRealOrders(rows);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [customer]);
+  const { loading, error, orders: realOrders, retry } = useCustomerOrders(customer?.email);
 
   const latestDemo = demoOrders[0];
   const latestReal = realOrders[0] ?? null;
@@ -41,7 +28,7 @@ export function AccountOverview() {
       <section className="account-stats" aria-label="Resumo da conta">
         <Link href="/conta/pedidos" className="stat-card">
           <Package size={20} aria-hidden="true" />
-          <strong>{orderTotalCount}</strong>
+          <strong>{error || loading ? "—" : orderTotalCount}</strong>
           <span>{customer ? "Pedidos registrados" : "Pedidos demonstrativos"}</span>
         </Link>
         <Link href="/favoritos" className="stat-card">
@@ -62,7 +49,14 @@ export function AccountOverview() {
             Ver histórico <ArrowRight size={15} aria-hidden="true" />
           </Link>
         </div>
-        {customer ? (
+        {error ? (
+          <div className="error-summary" role="alert">
+            <p>Não foi possível carregar seus pedidos.</p>
+            <button type="button" className="text-link" onClick={retry}>Tentar novamente</button>
+          </div>
+        ) : loading ? (
+          <p role="status">Carregando seus pedidos…</p>
+        ) : customer ? (
           latestReal ? (
             <RealOrderCard order={latestReal} />
           ) : (

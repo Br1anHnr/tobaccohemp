@@ -219,41 +219,39 @@ export function RealOrderCard({ order }: { order: CustomerOrderDetail }) {
   );
 }
 
-export async function fetchCustomerOrdersClient(): Promise<CustomerOrderDetail[]> {
-  try {
-    const response = await fetch("/api/auth/orders", { cache: "no-store" });
-    if (!response.ok) return [];
-    const body = await response.json().catch(() => null);
-    return Array.isArray(body?.data) ? (body.data as CustomerOrderDetail[]) : [];
-  } catch {
-    return [];
-  }
+export function useCustomerOrders(email?: string) {
+  const [attempt, setAttempt] = useState(0);
+  const [result, setResult] = useState<{ email: string; attempt: number; orders: CustomerOrderDetail[]; error: boolean }>();
+  useEffect(() => {
+    if (!email) return;
+    const controller = new AbortController();
+    const update = async () => {
+      try {
+        const response = await fetch("/api/auth/orders", { cache: "no-store", signal: controller.signal });
+        const body = await response.json();
+        if (!response.ok || !Array.isArray(body?.data)) throw new Error();
+        if (!controller.signal.aborted) setResult({ email, attempt, orders: body.data, error: false });
+      } catch {
+        if (!controller.signal.aborted) setResult({ email, attempt, orders: [], error: true });
+      }
+    };
+    void update();
+    return () => controller.abort();
+  }, [attempt, email]);
+  const current = result?.email === email && result?.attempt === attempt ? result : undefined;
+  return {
+    loading: Boolean(email && !current),
+    error: current?.error ?? false,
+    orders: current?.orders ?? [],
+    retry: () => setAttempt(value => value + 1),
+  };
 }
 
 export function OrderHistory() {
   const customer = useAccount((s) => s.customer);
   const [demoStatus, setDemoStatus] = useState<OrderStatus | "">("");
   const [realStatus, setRealStatus] = useState<RealOrderStatus | "">("");
-  const [loadedState, setLoadedState] = useState<{
-    email: string | null;
-    orders: CustomerOrderDetail[];
-  }>({ email: null, orders: [] });
-
-  useEffect(() => {
-    if (!customer) return;
-    let cancelled = false;
-    void fetchCustomerOrdersClient().then((rows) => {
-      if (!cancelled) {
-        setLoadedState({ email: customer.email, orders: rows });
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [customer]);
-
-  const loading = Boolean(customer) && loadedState.email !== customer?.email;
-  const realOrders = loadedState.email === customer?.email ? loadedState.orders : [];
+  const { loading, error, orders: realOrders, retry } = useCustomerOrders(customer?.email);
 
   if (!customer) {
     const visible = demoOrders.filter((o) => !demoStatus || o.status === demoStatus);
@@ -322,19 +320,24 @@ export function OrderHistory() {
           </select>
         </label>
       </div>
-      <p className="muted" role="status">
+      {error ? (
+        <div className="error-summary" role="alert">
+          <p>Não foi possível carregar seus pedidos.</p>
+          <button type="button" className="text-link" onClick={retry}>Tentar novamente</button>
+        </div>
+      ) : <p className="muted" role="status">
         {loading
           ? "Carregando seus pedidos…"
           : `${visibleReal.length} ${visibleReal.length === 1 ? "pedido" : "pedidos"}`}
-      </p>
-      {!loading && visibleReal.length > 0 && (
+      </p>}
+      {!loading && !error && visibleReal.length > 0 && (
         <div className="order-list">
           {visibleReal.map((order) => (
             <RealOrderCard key={order.id} order={order} />
           ))}
         </div>
       )}
-      {!loading && visibleReal.length === 0 && (
+      {!loading && !error && visibleReal.length === 0 && (
         <div className="empty-state compact">
           <h3>
             {realStatus

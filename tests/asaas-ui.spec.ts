@@ -214,6 +214,28 @@ test("Authenticated customer order history shows persisted orders and accesses c
   await expect(page.getByRole("link", { name: "Consultar no checkout" })).toHaveAttribute("href", "/checkout?asaasOrder=sandbox-ui-order");
 });
 
+test("Customer order history distinguishes an unavailable API from an empty account", async ({ page }) => {
+  let available = false;
+  await page.route("**/api/auth/session", route => route.fulfill({ json: { data: syntheticAccount } }));
+  await page.route("**/api/auth/orders", route => available
+    ? route.fulfill({ json: { data: [] } })
+    : route.fulfill({ status: 503, json: { error: { message: "Serviço indisponível" } } }));
+
+  await page.goto("/conta/entrar");
+  await page.getByRole("button", { name: "Sim, tenho 18+" }).click();
+  await page.getByLabel("E-mail", { exact: true }).fill("synthetic@example.test");
+  await page.getByLabel("Senha", { exact: true }).fill("Synthetic123");
+  await page.getByRole("button", { name: "Entrar", exact: true }).click();
+  const orderAlert = page.getByRole("alert").filter({ hasText: "Não foi possível carregar seus pedidos." });
+  await expect(orderAlert).toBeVisible();
+  await page.getByRole("link", { name: "Meus pedidos" }).click();
+  await expect(orderAlert).toBeVisible();
+  await expect(page.getByText("Você ainda não possui pedidos registrados nesta conta.")).toHaveCount(0);
+  available = true;
+  await page.getByRole("button", { name: "Tentar novamente" }).click();
+  await expect(page.getByText("Você ainda não possui pedidos registrados nesta conta.")).toBeVisible();
+});
+
 test("Sandbox admin dashboard separates test totals, stock/history, diagnostics and authenticated reconciliation/cancel", async ({ page }, info) => {
   await page.route("**/api/admin/auth/session", (route) =>
     route.fulfill({ json: { data: { id: "synthetic-admin", name: "Admin Sintético", email: "admin@example.test", role: "admin" } } }),
