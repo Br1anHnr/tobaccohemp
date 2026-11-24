@@ -30,7 +30,7 @@ const subscribeHydration = () => () => {};
 const isClientHydrated = () => true;
 const isServerHydrated = () => false;
 
-const SAFE_NEXT_RE = /^\/(?:checkout|conta(?:\/(?:pedidos|perfil))?|admin\/teste-pagamento)$/;
+const SAFE_NEXT_RE = /^\/(?:checkout|pedido-confirmado(?:\?asaasOrder=[\w-]{1,150})?|conta(?:\/(?:pedidos|perfil))?|admin\/teste-pagamento)$/;
 
 export function AuthForm({ mode }: { mode: Mode }) {
   const router = useRouter();

@@ -54,23 +54,7 @@ export interface AdminCategory {
   createdAt: string;
 }
 
-export interface Kpi {
-  id: string;
-  label: string;
-  value: string;
-  delta: number | null;
-  direction: "up" | "down";
-  hint: string;
-}
-
 export interface SeriesPoint {
   label: string;
   value: number;
-}
-
-export interface DashboardMetrics {
-  kpis: Kpi[];
-  salesSeries: SeriesPoint[];
-  categoryPerformance: SeriesPoint[];
-  lowStock: AdminProduct[];
 }

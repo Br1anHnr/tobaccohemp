@@ -33,9 +33,13 @@ try {
   started = true;
   const connection = new Client({host:"127.0.0.1",port,user:"sandbox_test",password:"synthetic-local-only",database:"postgres"});
   await connection.connect();
-  try {await connection.query("CREATE DATABASE asaas_disposable");} finally {await connection.end();}
+  try {
+    await connection.query("CREATE DATABASE asaas_disposable");
+    await connection.query("CREATE DATABASE asaas_isolated_disposable");
+  } finally {await connection.end();}
   const child = spawn(process.execPath, ["node_modules/@playwright/test/cli.js", "test", "--config", "playwright.sandbox.config.ts"], {
     stdio: "inherit", env: { ...process.env, NODE_ENV: "test", VERCEL: "", VERCEL_ENV: "", APP_ORIGIN: "", ADMIN_ENABLED: "", DATABASE_URL: `postgresql://sandbox_test:synthetic-local-only@127.0.0.1:${port}/asaas_disposable`, ASAAS_DISPOSABLE_TEST: "1",
+      ASAAS_TEST_ISOLATED_DATABASE_URL: `postgresql://sandbox_test:synthetic-local-only@127.0.0.1:${port}/asaas_isolated_disposable`,
       ASAAS_SANDBOX_ENABLED: "1", ASAAS_SANDBOX_DATASET: "synthetic", ASAAS_SANDBOX_API_KEY: "synthetic-api-key-never-valid", ASAAS_SANDBOX_WEBHOOK_TOKEN: "synthetic-webhook-token-at-least-32-characters", ASAAS_SANDBOX_CUSTOMER_ID: "cus_synthetic", ASAAS_SANDBOX_PRODUCT_IDS: "sandbox-accessory" },
   });
   code = await new Promise(done => child.once("exit", value => done(value ?? 1)));

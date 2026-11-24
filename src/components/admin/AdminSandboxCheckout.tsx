@@ -29,7 +29,7 @@ import { useAccount } from "@/store/account-store";
 import { useCart } from "@/store/cart-store";
 import type { CustomerAddress, CustomerProfile } from "@/types/account";
 import { Button, ButtonLink } from "@/components/ui/Button";
-import type { SandboxPaymentData } from "@/components/commerce/AsaasSandboxCheckout";
+import type { sandboxPaymentView } from "@/modules/orders/infrastructure/asaas-sandbox";
 
 interface SandboxProductItem {
   id: string;
@@ -41,7 +41,7 @@ interface SandboxProductItem {
   stock: number;
 }
 
-type AdminPaymentView = SandboxPaymentData & {
+type AdminPaymentView = Awaited<ReturnType<typeof sandboxPaymentView>> & {
   sandboxStock?: Array<{ productId: string; productName: string; quantity: number }>;
 };
 

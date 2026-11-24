@@ -42,11 +42,15 @@ function passwordInput(value: unknown): string {
 
 export function signUpInput(value: unknown): CustomerSignUpInput {
   const input = objectInput(value, ["name", "email", "phone", "password"]);
+  return { ...checkoutContactInput({ name: input.name, email: input.email, phone: input.phone }), password: passwordInput(input.password) };
+}
+
+export function checkoutContactInput(value: unknown): Pick<CustomerSignUpInput, "name" | "email" | "phone"> {
+  const input = objectInput(value, ["name", "email", "phone"]);
   return {
     name: textInput(input.name, 120),
     email: emailInput(input.email),
     phone: phoneInput(input.phone),
-    password: passwordInput(input.password),
   };
 }
 

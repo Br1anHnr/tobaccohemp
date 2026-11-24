@@ -92,6 +92,22 @@ export interface DashboardMetrics {
   categoryPerformance: DashboardSeriesPoint[];
 }
 
+export interface OperationsDashboardMetrics {
+  customers: number;
+  products: number;
+  units: number;
+  stockValueCents: number;
+  confirmedCents: number;
+  averagePaidCents: number | null;
+  ordersByStatus: Array<{ status: import("./orders").OrderStatus; count: number }>;
+  recent: Array<{ id: string; number: string; status: import("./orders").OrderStatus; totalCents: number; createdAt: string }>;
+  lowStock: Array<{ id: string; name: string; quantity: number; reorderPoint: number }>;
+  bestSellers: DashboardSeriesPoint[];
+  salesSeries: DashboardSeriesPoint[];
+  orderSeries: DashboardSeriesPoint[];
+  categoryPerformance: DashboardSeriesPoint[];
+}
+
 /** Minimal role-based access control. `admin` implies every `operator` capability. */
 export type AdminRole = "admin" | "operator";
 

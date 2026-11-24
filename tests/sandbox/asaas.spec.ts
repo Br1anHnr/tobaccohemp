@@ -1,8 +1,9 @@
 import { test, expect } from "@playwright/test";
 import { NextRequest } from "next/server";
 import { execFileSync } from "node:child_process";
-import { pool, hasIsolatedSandboxDatabase } from "../../src/shared/server/database";
-import { ensureSchema, migrations } from "../../src/shared/server/migrate";
+import { pool, sandboxPool, closeSandboxPool, hasIsolatedSandboxDatabase } from "../../src/shared/server/database";
+import { ensureSchema, ensureSandboxSchema, migrations } from "../../src/shared/server/migrate";
+import { ASAAS_SANDBOX } from "../../src/lib/constants";
 import { signUpCustomer, customerSessionCookie, bootstrapAdminAccount, authenticate, sessionCookie } from "../../src/modules/auth";
 import { createOrder, getOrderDetail, expireOverdueOrders, transitionOrderStatus, listOrderHistory, listCustomerOrders } from "../../src/modules/orders";
 import { createSandboxPayment, processAsaasEvent, sandboxPaymentView, sandboxDashboard, adminCancelSandboxAttempt } from "../../src/modules/orders/infrastructure/asaas-sandbox";
@@ -15,6 +16,7 @@ import { POST as checkout } from "../../src/app/api/checkout/asaas/route";
 import { GET as lookup } from "../../src/app/api/checkout/asaas/[id]/route";
 import { GET as customerOrdersRoute } from "../../src/app/api/auth/orders/route";
 import { POST as createAddressRoute } from "../../src/app/api/auth/addresses/route";
+import { operationsDashboard } from "../../src/modules/dashboard/application/operations-dashboard";
 
 test.describe.configure({ mode: "serial" });
 type Payment = Record<string, unknown>;
@@ -71,7 +73,7 @@ test.beforeAll(async () => {
   const second = await signUpCustomer({ name: "Outro Teste", email: "other@example.test", phone: "11999990002", password: "Synthetic-test-password123" });
   account = { id: first.account.id, token: first.token }; other = { id: second.account.id, token: second.token };
 });
-test.afterAll(async () => { await pool().end(); });
+test.afterAll(async () => { await closeSandboxPool(); await pool().end(); });
 test.beforeEach(() => { failure = "none"; requests.length = 0; });
 
 test("HTTP webhook rejects missing/wrong auth and malformed payload; unknown event responds direct 200", async () => {
@@ -443,7 +445,7 @@ test("customer order history endpoint isolates accounts and admin demo history e
   expect(adminDemoHistory.some(entry => ordersA.some(o => o.id === entry.orderId))).toBe(false);
 });
 
-test("checkout config unlocks admin_sandbox only for authenticated admin in production and /api/admin/asaas/checkout validates callbackPath", async () => {
+test("production uses a paid isolated order to authorize one customer and preserves the admin path", async () => {
   const saved = { ...process.env };
   let adminToken = "";
   try {
@@ -462,7 +464,11 @@ test("checkout config unlocks admin_sandbox only for authenticated admin in prod
     process.env.APP_ORIGIN = "https://tobaccohemp.vercel.app";
     process.env.ADMIN_ENABLED = "1";
     process.env.ASAAS_SANDBOX_ADMIN_ONLY = "1";
-    process.env.ASAAS_SANDBOX_DATABASE_URL = "postgresql://u:p@ep-abc-pooler.sa-east-1.aws.neon.tech/th_asaas_isolated";
+    process.env.ASAAS_SANDBOX_DATABASE_URL = process.env.ASAAS_TEST_ISOLATED_DATABASE_URL;
+    await ensureSandboxSchema();
+    const db = sandboxPool();
+    await db.query("INSERT INTO products(id,sku,name,category_slug,price_cents,active,created_at,tags) VALUES('sandbox-accessory','SYNTHETIC-CASE','Case sintético','cases',3990,true,now(),ARRAY['synthetic'])");
+    await db.query("INSERT INTO inventory(product_id,quantity,reorder_point,updated_at) VALUES('sandbox-accessory',10,1,now())");
 
     const anonRes = await asaasConfigRoute(request("/api/checkout/asaas/config"));
     expect(anonRes.status).toBe(200);
@@ -487,6 +493,52 @@ test("checkout config unlocks admin_sandbox only for authenticated admin in prod
     expect(adminRes.headers.get("cache-control")).toBe("no-store");
     expect(adminRes.headers.get("vary")).toBe("Cookie");
     expect(await adminRes.json()).toEqual({ data: { enabled: true, mode: "admin_sandbox" } });
+
+    const seed = await createSandboxPayment(input("authorized-proof", "card"), account.id, process.env.APP_ORIGIN, client);
+    await db.query("UPDATE orders SET order_number=$2 WHERE id=$1", [seed.order.id, ASAAS_SANDBOX.authorizedCustomerOrder]);
+    const payment = {
+      id: "pay_authorized_proof", externalReference: `th-sbx-${seed.order.id}`,
+      checkoutSession: seed.order.providerReference, billingType: "CREDIT_CARD", value: 39.90, status: "CONFIRMED",
+    };
+    payments.set(payment.id, payment);
+    await processAsaasEvent(event("authorized-proof-paid", "PAYMENT_CONFIRMED", payment), client);
+    const customerHeaders = { Origin: process.env.APP_ORIGIN, Cookie: `${customerSessionCookie}=${account.token}` };
+    const otherHeaders = { ...customerHeaders, Cookie: `${customerSessionCookie}=${other.token}` };
+    const authorized = await asaasConfigRoute(request("/api/checkout/asaas/config", undefined, customerHeaders));
+    expect(await authorized.json()).toEqual({ data: { enabled: true, mode: "customer_sandbox" } });
+    expect((await checkout(request("/api/checkout/asaas", input("not-authorized"), otherHeaders))).status).toBe(403);
+
+    const commercialBefore = await operationsDashboard(new URLSearchParams());
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = mockFetch;
+    try {
+      const delivery = { zip: "12500000", street: "Rua Sintética", number: "10", city: "Guaratinguetá", state: "SP" };
+      const created = await checkout(request("/api/checkout/asaas", { ...input("authorized-customer-test", "card"), delivery }, customerHeaders));
+      expect(created.status).toBe(200);
+      const { data } = await created.json();
+      expect(data.checkoutDetails.delivery).toMatchObject(delivery);
+      expect(data.checkoutDetails.contact).toBeUndefined();
+      expect(data.order.history).toBeUndefined();
+      const submitted = JSON.parse(String(requests.findLast(r => r.url.endsWith("/checkouts"))?.init?.body));
+      expect(submitted.customer).toBe("cus_synthetic");
+      expect(submitted).not.toHaveProperty("customerData");
+      expect(submitted.callback.successUrl).toBe(`${process.env.APP_ORIGIN}/pedido-confirmado?asaasOrder=${data.order.id}`);
+      const persisted = await getOrderDetail(data.order.id, db);
+      expect(persisted.history[0].metadata?.stockMovements).toEqual([{ productId: "sandbox-accessory", before: 9, after: 8 }]);
+      const history = await customerOrdersRoute(request("/api/auth/orders", undefined, customerHeaders));
+      expect((await history.json()).data).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: seed.order.id, status: "paid", detailPath: `/pedido-confirmado?asaasOrder=${seed.order.id}` }),
+      ]));
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    const sandbox = await operationsDashboard(new URLSearchParams("period=7&interval=week"), db, ["sandbox-accessory"]);
+    expect(sandbox.confirmedCents).toBe(3990);
+    expect(sandbox.averagePaidCents).toBe(3990);
+    expect(sandbox.units).toBe(8);
+    expect(sandbox.recent).toHaveLength(2);
+    expect(sandbox.bestSellers).toEqual([{ label: "Case sintético", value: 1 }]);
+    expect(await operationsDashboard(new URLSearchParams())).toEqual(commercialBefore);
   } finally {
     process.env = saved;
   }

@@ -205,7 +205,11 @@ test.beforeEach(async ({ page }) => {
         createdAt: "2026-11-15T15:00:00.000Z",
       });
       data = order;
-    } else if (path === "/api/admin/dashboard") data = { customers: 2, products: 2, units: 4, lowStockProducts: 2, stockValueCents: 35960 };
+    } else if (path === "/api/admin/dashboard") data = {
+      customers: 2, products: 2, units: 4, lowStock: [], stockValueCents: 35960,
+      confirmedCents: 0, averagePaidCents: null, ordersByStatus: [], recent: [],
+      bestSellers: [], salesSeries: [], orderSeries: [], categoryPerformance: [],
+    };
     else return route.fulfill({ status: 404, json: { error: { code: "NOT_FOUND", message: "Fixture não disponível." } } });
     return route.fulfill({ json: { data }, headers: { "Cache-Control": "no-store" } });
   });
@@ -224,9 +228,9 @@ test("admin dashboard renders indicators and charts without overflow", async ({
   await page.goto("/admin");
   await expect(page.getByRole("heading", { name: /Painel/ })).toBeVisible();
   await expect(page.getByText("Valor em estoque", { exact: true })).toBeVisible();
-  await expect(page.getByText("Vendas reais desabilitadas — apenas pedidos demonstrativos.")).toBeVisible();
-  await expect(page.locator(".kpi-card")).toHaveCount(4);
-  await expect(page.locator(".chart-card")).toHaveCount(3);
+  await expect(page.getByText("Nenhuma venda confirmada no período.")).toBeVisible();
+  await expect(page.locator(".kpi-card")).toHaveCount(7);
+  await expect(page.locator(".chart-card")).toHaveCount(6);
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= innerWidth + 1,

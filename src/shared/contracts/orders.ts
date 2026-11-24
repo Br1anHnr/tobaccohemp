@@ -31,6 +31,12 @@ export const ORDER_STOCK_STATUSES = [
 ] as const;
 export type OrderStockStatus = (typeof ORDER_STOCK_STATUSES)[number];
 
+export interface StockMovement {
+  productId: string;
+  before: number;
+  after: number;
+}
+
 export interface OrderItem {
   id: string;
   orderId: string;

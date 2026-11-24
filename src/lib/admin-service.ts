@@ -1,9 +1,8 @@
-import type { Customer, AdminProduct, AdminProductImage, DashboardMetrics } from "@/types/admin";
-import { currency } from "@/lib/currency";
+import type { Customer, AdminProduct, AdminProductImage } from "@/types/admin";
 import { adminEndpoints } from "@/shared/contracts/admin";
 import type {
   AdminUser, Customer as WireCustomer, Product, ProductInput, InventoryItem,
-  DashboardMetrics as WireMetrics, DataResponse, LoginInput, Category, CategoryInput,
+  OperationsDashboardMetrics, DataResponse, LoginInput, Category, CategoryInput,
 } from "@/shared/contracts/admin";
 import type {
   CreateOrderInput,
@@ -176,20 +175,7 @@ export async function replaceProductImage(productId: string, imageId: string, fi
   );
   return { id: image.id, url: image.url, alt: image.alt, position: image.position };
 }
-export async function fetchDashboard(): Promise<DashboardMetrics> {
-  const [metrics, products] = await Promise.all([
-    request<WireMetrics>(adminEndpoints.dashboard), fetchProducts(),
-  ]);
-  const hint = "Dados sintéticos — sem histórico comparativo";
-  return {
-    kpis: [
-      { id: "revenue", label: "Valor em estoque", value: currency(metrics.stockValueCents / 100), delta: null, direction: "up", hint },
-      { id: "orders", label: "Produtos cadastrados", value: String(metrics.products), delta: null, direction: "up", hint },
-      { id: "customers", label: "Clientes cadastrados", value: String(metrics.customers), delta: null, direction: "up", hint },
-      { id: "conversion", label: "Unidades em estoque", value: String(metrics.units), delta: null, direction: "up", hint },
-    ],
-    salesSeries: metrics.salesSeries ?? [],
-    categoryPerformance: metrics.categoryPerformance ?? [],
-    lowStock: products.filter(product => product.active && !product.archived && product.stock <= (product.reorderPoint ?? 0)),
-  };
+export async function fetchDashboard(environment: "commercial" | "sandbox", period: string, interval: string) {
+  const query = new URLSearchParams({ environment, period, interval });
+  return request<OperationsDashboardMetrics>(`${adminEndpoints.dashboard}?${query}`);
 }

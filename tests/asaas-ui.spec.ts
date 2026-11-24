@@ -167,6 +167,61 @@ test("Sandbox checkout resets on expired/uncertain and clears stale 404 sessionS
   await expect(page.getByRole("link", { name: "Explorar a loja" })).toBeVisible();
 });
 
+test("allowlisted customer returns from hosted checkout, sees persisted outcome and starts another order", async ({ page }, info) => {
+  const delivery = {
+    id: "synthetic-address", label: "Casa", zip: "12500000", street: "Rua Sintética",
+    number: "10", complement: "", city: "Guaratinguetá", state: "SP", isDefault: true, updatedAt: now,
+  };
+  const signedIn = { ...syntheticAccount, addresses: [delivery] };
+  await page.route("**/api/auth/session", route => route.fulfill({ json: { data: signedIn } }));
+  await page.route("**/api/auth/login", route => route.fulfill({ json: { data: signedIn } }));
+  await page.route("**/api/auth/addresses", route => route.fulfill({ json: { data: [delivery] } }));
+  await page.route("**/api/checkout/asaas/config", route => route.fulfill({ json: { data: { enabled: true, mode: "customer_sandbox" } } }));
+  await page.route("**/api/admin/asaas/**", route => route.fulfill({ status: 401 }));
+  let posts = 0;
+  const response = (status: string) => {
+    const data = receipt("card", status);
+    return {
+      ...data, order: { ...data.order, id: `sandbox-customer-${posts}`, orderNumber: `TH-TEST-${posts}` },
+      checkoutDetails: { delivery },
+    };
+  };
+  await page.route("**/api/checkout/asaas", async route => {
+    posts++;
+    expect(route.request().postDataJSON()).toMatchObject({
+      contact: { name: posts === 1 ? "Cliente Editado" : signedIn.name, email: signedIn.email },
+      delivery: { street: delivery.street, zip: delivery.zip },
+    });
+    await route.fulfill({ json: { data: response("pending_payment") } });
+  });
+  let shopOrigin = "";
+  await page.route("https://sandbox.asaas.com/checkoutSession/show?**", route => route.fulfill({
+    status: 302, headers: { location: `${shopOrigin}/pedido-confirmado?asaasOrder=sandbox-customer-${posts}` },
+  }));
+  await page.route("**/api/checkout/asaas/sandbox-customer-*", route =>
+    route.fulfill({ json: { data: response("paid") } }),
+  );
+  await enterCheckout(page);
+  shopOrigin = new URL(page.url()).origin;
+  await page.getByRole("button", { name: "Editar", exact: true }).click();
+  await page.getByLabel("Nome completo").fill("Cliente Editado");
+  await page.getByRole("radio", { name: /Cartão de crédito/ }).check();
+  await page.getByRole("button", { name: "Finalizar pedido" }).click();
+  await expect(page).toHaveURL(/pedido-confirmado\?asaasOrder=sandbox-customer-1$/);
+  await expect(page.getByRole("heading", { name: "Pedido TH-TEST-1" })).toBeVisible();
+  await expect(page.getByText("Pago · R$ 49,90")).toBeVisible();
+  await expect(page.getByText(/Rua Sintética, 10/)).toBeVisible();
+  await expect(page.getByText("Tentativa Asaas Sandbox registrada.")).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+  await page.screenshot({ path: `.preview-validation/customer-confirmation-${info.project.name}.png`, fullPage: true });
+  await enterCheckout(page, false);
+  await expect(page.getByText(signedIn.name, { exact: true })).toBeVisible();
+  await page.getByRole("radio", { name: /Cartão de crédito/ }).check();
+  await page.getByRole("button", { name: "Finalizar pedido" }).click();
+  await expect(page.getByRole("heading", { name: "Pedido TH-TEST-2" })).toBeVisible();
+  expect(posts).toBe(2);
+});
+
 test("Sandbox card opens only hosted sandbox, with no card fields or charge from callback", async ({ page }, info) => {
   let posts = 0;
   await page.route("**/api/checkout/asaas", (route) => {
@@ -229,10 +284,13 @@ test("Customer order history distinguishes an unavailable API from an empty acco
   const orderAlert = page.getByRole("alert").filter({ hasText: "Não foi possível carregar seus pedidos." });
   await expect(orderAlert).toBeVisible();
   await page.getByRole("link", { name: "Meus pedidos" }).click();
+  await expect(page).toHaveURL(/\/conta\/pedidos$/);
   await expect(orderAlert).toBeVisible();
   await expect(page.getByText("Você ainda não possui pedidos registrados nesta conta.")).toHaveCount(0);
+  const retry = page.getByRole("button", { name: "Tentar novamente" });
+  await expect(retry).toBeVisible();
   available = true;
-  await page.getByRole("button", { name: "Tentar novamente" }).click();
+  await retry.click();
   await expect(page.getByText("Você ainda não possui pedidos registrados nesta conta.")).toBeVisible();
 });
 

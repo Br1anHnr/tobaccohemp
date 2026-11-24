@@ -1,5 +1,20 @@
 import { dashboardMetrics } from "@/modules/dashboard";
+import { operationsDashboard } from "@/modules/dashboard/application/operations-dashboard";
+import { sandboxConfig } from "@/modules/orders/infrastructure/asaas-client";
+import { sandboxPool } from "@/shared/server/database";
+import { ensureSandboxSchema } from "@/shared/server/migrate";
+import { AdminError, invalid } from "@/shared/server/validation";
 import { adminRoute } from "@/shared/server/admin-http";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const GET = adminRoute(() => dashboardMetrics(), { role: "operator" });
+export const GET = adminRoute(async (request, user) => {
+  const query = request.nextUrl.searchParams;
+  const environment = query.get("environment");
+  if (environment === null) return dashboardMetrics();
+  if (environment === "commercial") return operationsDashboard(query);
+  if (environment !== "sandbox") return invalid();
+  if (user?.role !== "admin") throw new AdminError(403, "FORBIDDEN", "Acesso restrito a administradores.");
+  const config = sandboxConfig("admin");
+  await ensureSandboxSchema();
+  return operationsDashboard(query, sandboxPool(), [...config.productIds]);
+}, { role: "operator" });

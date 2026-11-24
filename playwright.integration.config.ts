@@ -31,6 +31,13 @@ export default defineConfig({
       ADMIN_PASSWORD: adminPassword,
       ADMIN_INTEGRATION_TEST: "1",
       NEXT_TELEMETRY_DISABLED: "1",
+      ASAAS_SANDBOX_ENABLED: "0",
+      // Use local storage unless the integration runner explicitly received R2 settings.
+      R2_ACCOUNT_ID: process.env.R2_ACCOUNT_ID ?? "",
+      R2_ACCESS_KEY_ID: process.env.R2_ACCESS_KEY_ID ?? "",
+      R2_SECRET_ACCESS_KEY: process.env.R2_SECRET_ACCESS_KEY ?? "",
+      R2_BUCKET: process.env.R2_BUCKET ?? "",
+      R2_PUBLIC_URL: process.env.R2_PUBLIC_URL ?? "",
     },
   },
 });

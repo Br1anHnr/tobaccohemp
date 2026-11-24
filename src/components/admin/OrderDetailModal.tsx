@@ -11,7 +11,9 @@ import {
   ORDER_STATUS_LABEL,
   ORDER_STOCK_STATUS_LABEL,
 } from "@/modules/orders/domain/order-status";
-import type { OrderDetail, OrderStatus } from "@/shared/contracts/orders";
+import type { OrderDetail, OrderStatus, StockMovement } from "@/shared/contracts/orders";
+import type { sandboxAdminOrderDetail } from "@/modules/orders/infrastructure/asaas-sandbox";
+import { formatPhone, formatZip } from "@/lib/auth";
 import { Modal } from "@/components/ui/Modal";
 import { FormField } from "@/components/ui/FormField";
 import { StatusBadge } from "./Badge";
@@ -39,16 +41,25 @@ function OrderDetailBody({
   orderId,
   onLoaded,
   onUpdated,
+  sandbox,
 }: {
   orderId: string;
   onLoaded: (detail: OrderDetail) => void;
   onUpdated: () => void;
+  sandbox: boolean;
 }) {
   const fetcher = useCallback(async () => {
-    const data = await fetchOrderDetail(orderId);
-    onLoaded(data);
+    let data: Awaited<ReturnType<typeof sandboxAdminOrderDetail>>;
+    if (sandbox) {
+      const response = await fetch(`/api/admin/asaas/orders/${encodeURIComponent(orderId)}?view=detail`, { cache: "no-store" });
+      if (!response.ok) throw new Error("Não foi possível consultar o pedido Sandbox.");
+      data = (await response.json()).data;
+    } else {
+      data = { order: await fetchOrderDetail(orderId), checkoutDetails: null, stock: [] };
+    }
+    onLoaded(data.order);
     return data;
-  }, [orderId, onLoaded]);
+  }, [orderId, onLoaded, sandbox]);
 
   const { status, data: fetched, retry } = useResource(fetcher);
   const [override, setOverride] = useState<OrderDetail | null>(null);
@@ -57,7 +68,9 @@ function OrderDetailBody({
   const [mutationError, setMutationError] = useState("");
   const [nowMs, setNowMs] = useState(() => Date.now());
 
-  const detail = override ?? fetched;
+  const detail = override ?? fetched?.order;
+  const contact = fetched?.checkoutDetails?.contact;
+  const delivery = fetched?.checkoutDetails?.delivery;
   const expiresAtMs =
     detail && detail.status === "pending_payment" && detail.expiresAt
       ? new Date(detail.expiresAt).getTime()
@@ -118,7 +131,7 @@ function OrderDetailBody({
       <dl className="order-detail-grid">
         <div>
           <dt>Cliente / Referência</dt>
-          <dd>{detail.customerLabel}</dd>
+          <dd>{contact ? <>{contact.name}<br />{contact.email}<br />{formatPhone(contact.phone)}</> : detail.customerLabel}</dd>
         </div>
         <div>
           <dt>Canal</dt>
@@ -126,12 +139,12 @@ function OrderDetailBody({
         </div>
         <div>
           <dt>Forma</dt>
-          <dd>{ORDER_PAYMENT_METHOD_LABEL[detail.paymentMethod]}</dd>
+          <dd>{sandbox ? (detail.paymentMethod === "pix" ? "Pix" : "Cartão hospedado") : ORDER_PAYMENT_METHOD_LABEL[detail.paymentMethod]}</dd>
         </div>
         <div>
           <dt>Provedor</dt>
           <dd>
-            {detail.paymentProvider} ({detail.isDemo ? "demonstrativo" : "ativo"})
+            {sandbox ? "Asaas Sandbox" : `${detail.paymentProvider} (${detail.isDemo ? "demonstrativo" : "ativo"})`}
           </dd>
         </div>
         <div>
@@ -157,8 +170,13 @@ function OrderDetailBody({
       <section className="order-detail-section" aria-label="Itens do pedido">
         <h3>Itens com preço congelado</h3>
         <ul className="order-detail-items">
-          {detail.items.map((item) => (
-            <li key={item.id}>
+          {detail.items.map((item) => {
+            const stock = fetched?.stock.find(row => row.productId === item.productId);
+            const hasAudit = detail.history.some(entry =>
+              Array.isArray(entry.metadata?.stockMovements) &&
+              (entry.metadata.stockMovements as StockMovement[]).some(movement => movement.productId === item.productId),
+            );
+            return <li key={item.id}>
               <div>
                 <strong>{item.productName}</strong>
                 <span className="cell-sub">
@@ -166,10 +184,14 @@ function OrderDetailBody({
                   {item.variant ? ` · ${item.variant}` : ""} · {item.quantity} ×{" "}
                   {currency(item.unitPriceCents / 100)}
                 </span>
+                {sandbox && <span className="cell-sub">
+                  {stock?.beforeReservation != null && !hasAudit && `Antes da reserva: ${stock.beforeReservation} un. · `}
+                  Estoque atual: {stock?.quantity ?? "indisponível"}
+                </span>}
               </div>
               <strong>{currency(item.lineTotalCents / 100)}</strong>
-            </li>
-          ))}
+            </li>;
+          })}
         </ul>
         <dl className="order-detail-totals">
           <div>
@@ -179,9 +201,10 @@ function OrderDetailBody({
           <div>
             <dt>Entrega</dt>
             <dd>
-              {detail.shippingCents > 0
+              {delivery ? `${delivery.street}, ${delivery.number}${delivery.complement ? ` · ${delivery.complement}` : ""} · ${delivery.city}/${delivery.state} · CEP ${formatZip(delivery.zip)}`
+                : detail.shippingCents > 0
                 ? currency(detail.shippingCents / 100)
-                : "A combinar"}
+                : sandbox ? "Endereço não registrado" : "A combinar"}
             </dd>
           </div>
           {detail.discountCents > 0 && (
@@ -197,7 +220,7 @@ function OrderDetailBody({
         </dl>
       </section>
 
-      <section className="order-detail-section" aria-label="Atualizar status">
+      {!sandbox && <section className="order-detail-section" aria-label="Atualizar status">
         <h3>Gerenciar status</h3>
         {nextStatuses.length > 0 ? (
           <div className="order-transition-box">
@@ -234,7 +257,7 @@ function OrderDetailBody({
             nova transição disponível.
           </p>
         )}
-      </section>
+      </section>}
 
       <section className="order-detail-section" aria-label="Histórico de status">
         <h3>Histórico de transições</h3>
@@ -250,6 +273,13 @@ function OrderDetailBody({
                 <span>{dateTimeFormat.format(new Date(entry.createdAt))}</span>
               </div>
               <p>{entry.reason}</p>
+              {Array.isArray(entry.metadata?.stockMovements) &&
+                (entry.metadata.stockMovements as StockMovement[]).map(movement => (
+                  <p key={movement.productId}>
+                    {detail.items.find(item => item.productId === movement.productId)?.productName ?? movement.productId}
+                    {" · "}{movement.before} → {movement.after} un.
+                  </p>
+                ))}
               <span className="cell-sub">
                 Origem: {ACTOR_LABEL[entry.actorType] ?? entry.actorType}
                 {entry.actorId ? ` · ${entry.actorId}` : ""}
@@ -270,10 +300,12 @@ export function OrderDetailModal({
   orderId,
   onClose,
   onUpdated,
+  sandbox = false,
 }: {
   orderId: string | null;
   onClose: () => void;
   onUpdated: () => void;
+  sandbox?: boolean;
 }) {
   const [orderNumber, setOrderNumber] = useState<string | null>(null);
 
@@ -300,6 +332,7 @@ export function OrderDetailModal({
           orderId={orderId}
           onLoaded={handleLoaded}
           onUpdated={onUpdated}
+          sandbox={sandbox}
         />
       )}
     </Modal>

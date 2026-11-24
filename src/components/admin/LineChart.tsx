@@ -1,4 +1,5 @@
 import type { SeriesPoint } from "@/types/admin";
+import { useId } from "react";
 
 const compactCurrency = new Intl.NumberFormat("pt-BR", {
   style: "currency",
@@ -15,6 +16,7 @@ export function LineChart({
   ariaLabel: string;
   formatValue?: (n: number) => string;
 }) {
+  const gradientId = useId();
   const w = 640;
   const h = 240;
   const pad = { top: 18, right: 16, bottom: 28, left: 64 };
@@ -54,7 +56,7 @@ export function LineChart({
     >
       <title>{ariaLabel}</title>
       <defs>
-        <linearGradient id="admin-area" x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
           <stop
             offset="0%"
             style={{ stopColor: "var(--brand-yellow)", stopOpacity: 0.32 }}
@@ -86,15 +88,15 @@ export function LineChart({
         </g>
       ))}
 
-      <path className="area" d={areaPath} fill="url(#admin-area)" />
+      <path className="area" d={areaPath} fill={`url(#${gradientId})`} />
       <path className="line" d={linePath} />
       {coords.map((p) => (
-        <circle key={p.label} className="point" cx={p.x} cy={p.y} r={3} />
+        <circle key={p.x} className="point" cx={p.x} cy={p.y} r={data.length > 60 ? 1 : 3} />
       ))}
 
       {labelIndices.map((i) => (
         <text
-          key={data[i].label}
+          key={i}
           className="axis-text"
           x={coords[i].x}
           y={h - 8}

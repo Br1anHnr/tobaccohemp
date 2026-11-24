@@ -1,12 +1,19 @@
 "use client";
 import { useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { ShieldCheck } from "lucide-react";
 import { useOrder } from "@/store/order-store";
 import { STORAGE } from "@/lib/constants";
 import { ButtonLink } from "@/components/ui/Button";
+import { useAccount } from "@/store/account-store";
+import { sandboxOrderId } from "@/lib/sandbox-attempt";
+import { AsaasSandboxCheckout } from "./AsaasSandboxCheckout";
 
 export function OrderConfirmation() {
   const setOrder = useOrder((s) => s.setOrder);
+  const orderId = sandboxOrderId(useSearchParams().get("asaasOrder"));
+  const hydrated = useAccount(s => s.hydrated);
+  const sessionPending = useAccount(s => s.sessionPending);
 
   useEffect(() => {
     setOrder(null);
@@ -16,6 +23,15 @@ export function OrderConfirmation() {
       /* Ignore storage restrictions. */
     }
   }, [setOrder]);
+
+  if (orderId) {
+    return <>
+      <h1>Acompanhar pedido</h1>
+      <p>Asaas Sandbox · pagamento de teste, sem cobrança ou envio real.</p>
+      {!hydrated || sessionPending ? <p role="status">Carregando pedido…</p>
+        : <AsaasSandboxCheckout mode="customer_sandbox" callbackOrderId={orderId} confirmation />}
+    </>;
+  }
 
   return (
     <div className="confirmation">

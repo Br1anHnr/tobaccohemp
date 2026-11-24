@@ -14,6 +14,7 @@ export const ASAAS_SANDBOX = {
   checkoutBase: "https://sandbox.asaas.com/checkoutSession/show",
   checkoutMinutes: 30,
   notice: "Asaas Sandbox · teste sintético sem valor financeiro",
+  authorizedCustomerOrder: "TH-D1B6BDF4",
 };
 export const STORAGE = {
   cart: "th-cart-v1",

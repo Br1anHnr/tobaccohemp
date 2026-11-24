@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { PoolClient } from "pg";
 import { ASAAS_SANDBOX } from "@/lib/constants";
+import type { CustomerAddressInput, CustomerSignUpInput } from "@/shared/contracts/customer";
 import type { OrderStatus } from "@/shared/contracts/orders";
 import { sandboxPool, type Db } from "@/shared/server/database";
 import { AdminError } from "@/shared/server/validation";
@@ -21,6 +22,12 @@ type Attempt = {
   last_error_code?: string | null;
   last_error_status?: number | null;
   last_error_at?: string | null;
+  checkout_details?: CheckoutDetails | null;
+};
+
+type CheckoutDetails = {
+  contact?: Pick<CustomerSignUpInput, "name" | "email" | "phone">;
+  delivery?: CustomerAddressInput;
 };
 
 export interface SandboxDiagnostic {
@@ -78,7 +85,7 @@ export async function createSandboxPayment(
   accountId: string,
   origin: string,
   client = new AsaasClient(),
-  options: { callbackPath?: string; requireAdminMode?: boolean } = {},
+  options: CheckoutDetails & { callbackPath?: string; requireAdminMode?: boolean; prefillSyntheticCustomer?: boolean } = {},
 ) {
   const config = sandboxConfig(options.requireAdminMode ? "admin" : "any");
   // Only cart lines, method and idempotency key come from the browser.
@@ -94,7 +101,10 @@ export async function createSandboxPayment(
     // Core freezes server prices, checks accessory eligibility and reserves inventory.
     const order = await createOrder(input, { actorType: "customer", actorId: accountId }, tx, true);
     if (order.paymentProvider !== "asaas" || order.isDemo) throw new AdminError(409, "SANDBOX_ASSOCIATION", "Pedido incompatível.");
-    await tx.query("INSERT INTO asaas_sandbox_attempts(order_id,external_reference,method,state) VALUES($1,$2,$3,'prepared') ON CONFLICT(order_id) DO NOTHING", [order.id, `th-sbx-${order.id}`, input.paymentMethod]);
+    const details = options.contact || options.delivery
+      ? JSON.stringify({ contact: options.contact, delivery: options.delivery })
+      : null;
+    await tx.query("INSERT INTO asaas_sandbox_attempts(order_id,external_reference,method,state,checkout_details) VALUES($1,$2,$3,'prepared',$4) ON CONFLICT(order_id) DO NOTHING", [order.id, `th-sbx-${order.id}`, input.paymentMethod, details]);
     return order.id;
   });
   // This commit is BEFORE the provider POST. A crash/timeout never resets creating.
@@ -117,6 +127,9 @@ export async function createSandboxPayment(
         ? await client.request("/payments", { customer: config.customer, billingType: "PIX", value: order.totalCents / 100, dueDate: new Date().toISOString().slice(0,10), externalReference: reference, description: "Acessórios sintéticos — teste Sandbox" })
         : await client.request("/checkouts", { billingTypes: ["CREDIT_CARD"], chargeTypes: ["DETACHED"], minutesToExpire: ASAAS_SANDBOX.checkoutMinutes, externalReference: reference,
           callback: { successUrl: callback, cancelUrl: callback, expiredUrl: callback },
+          // The configured synthetic Asaas customer provides hosted prefill.
+          // Storefront contact and delivery details are never sent to Asaas.
+          ...(options.prefillSyntheticCustomer && /^cus_[A-Za-z0-9]+$/.test(config.customer) ? { customer: config.customer } : {}),
           items: order.items.map(i => ({ name: i.productName, quantity: i.quantity, value: i.unitPriceCents / 100 })) });
       const id = resourceId(response.id);
       await transaction(async tx => {
@@ -356,9 +369,46 @@ export async function sandboxPaymentView(
   if (!diagnostic && (warning || a.state === "uncertain" || a.state === "review") && a.last_error_code) {
     diagnostic = { code: a.last_error_code, httpStatus: a.last_error_status ?? null };
   }
-  return { order, attemptState: a.state, environment: "sandbox" as const, sandboxStock: stockRows, ...(pix ? { pix } : {}), ...(warning ? { warning } : {}), ...(diagnostic ? { diagnostic } : {}) };
+  return { order, checkoutDetails: a.checkout_details ?? null, attemptState: a.state, environment: "sandbox" as const, sandboxStock: stockRows, ...(pix ? { pix } : {}), ...(warning ? { warning } : {}), ...(diagnostic ? { diagnostic } : {}) };
 }
 
+export function customerSandboxPayment(view: Awaited<ReturnType<typeof sandboxPaymentView>>) {
+  const { order } = view;
+  return {
+    order: {
+      id: order.id, orderNumber: order.orderNumber, status: order.status, paymentMethod: order.paymentMethod,
+      checkoutUrl: order.checkoutUrl, items: order.items, subtotalCents: order.subtotalCents,
+      shippingCents: order.shippingCents, discountCents: order.discountCents, totalCents: order.totalCents,
+    },
+    checkoutDetails: view.checkoutDetails?.delivery ? { delivery: view.checkoutDetails.delivery } : null,
+    attemptState: view.attemptState === "ready" ? "ready" : "processing",
+    environment: view.environment,
+    ...(view.pix ? { pix: view.pix } : {}),
+    ...(view.warning ? { warning: "PAYMENT_UNAVAILABLE" } : {}),
+  };
+}
+
+export async function sandboxAdminOrderDetail(id: string) {
+  const db = sandboxPool();
+  const attempt = await db.query<Pick<Attempt, "checkout_details">>(
+    `SELECT a.checkout_details FROM asaas_sandbox_attempts a
+       JOIN orders o ON o.id = a.order_id
+      WHERE o.id = $1 AND o.payment_provider = 'asaas' AND NOT o.is_demo`,
+    [id],
+  );
+  if (!attempt.rowCount) throw new AdminError(404, "NOT_FOUND", "Pedido Sandbox não encontrado.");
+  const order = await getOrderDetail(id, db);
+  const stock = await db.query<{ productId: string; quantity: number; beforeReservation: number | null }>(
+    `SELECT i.product_id AS "productId", i.quantity,
+            CASE WHEN i.updated_at = o.stock_reserved_at AND o.stock_status IN ('reserved', 'committed')
+                 THEN i.quantity + sum(oi.quantity)::int ELSE NULL END AS "beforeReservation"
+       FROM order_items oi JOIN inventory i ON i.product_id = oi.product_id JOIN orders o ON o.id = oi.order_id
+      WHERE oi.order_id = $1
+      GROUP BY i.product_id, i.quantity, i.updated_at, o.stock_reserved_at, o.stock_status`,
+    [id],
+  );
+  return { order, checkoutDetails: attempt.rows[0].checkout_details ?? null, stock: stock.rows };
+}
 export function parseAsaasEvent(value: unknown) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new AdminError(422,"INVALID_EVENT","Evento inválido.");
   const v = value as Record<string, unknown>;

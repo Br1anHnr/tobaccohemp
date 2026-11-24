@@ -14,8 +14,7 @@ export default function AdminDashboardPage() {
           Painel<span className="accent-dot">.</span>
         </h1>
         <p>
-          Acompanhe os principais indicadores da operação. Todos os valores são
-          fictícios e servem apenas para demonstração.
+          Acompanhe clientes, pedidos, pagamentos e estoque por ambiente.
         </p>
       </div>
       <Dashboard />

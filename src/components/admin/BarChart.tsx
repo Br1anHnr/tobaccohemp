@@ -1,4 +1,5 @@
 import type { SeriesPoint } from "@/types/admin";
+import { useId } from "react";
 
 const compactCurrency = new Intl.NumberFormat("pt-BR", {
   style: "currency",
@@ -15,6 +16,7 @@ export function BarChart({
   ariaLabel: string;
   formatValue?: (n: number) => string;
 }) {
+  const gradientId = useId();
   const w = 640;
   const h = 240;
   const pad = { top: 26, right: 12, bottom: 38, left: 64 };
@@ -41,7 +43,7 @@ export function BarChart({
     >
       <title>{ariaLabel}</title>
       <defs>
-        <linearGradient id="admin-bar-gradient" x1="0" y1="0" x2="0" y2="1">
+        <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
           <stop
             offset="0%"
             style={{ stopColor: "var(--brand-yellow)", stopOpacity: 0.95 }}
@@ -73,20 +75,19 @@ export function BarChart({
         </g>
       ))}
 
-      {data.map((d) => {
-        const i = data.indexOf(d);
+      {data.map((d, i) => {
         const x = pad.left + slot * i + (slot - barW) / 2;
         const y = yAt(d.value);
         const height = pad.top + innerH - y;
         return (
-          <g key={d.label}>
+          <g key={i}>
             <rect
               x={x}
               y={y}
               width={barW}
               height={height}
               rx={3}
-              fill="url(#admin-bar-gradient)"
+              fill={`url(#${gradientId})`}
             />
             <text
               className="axis-text"

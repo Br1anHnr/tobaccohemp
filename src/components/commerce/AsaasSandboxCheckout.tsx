@@ -11,9 +11,12 @@ import { sessionExpiredEvent } from "@/lib/admin-service";
 import { readSandboxAttempt, saveSandboxAttempt } from "@/lib/sandbox-attempt";
 import { ASAAS_SANDBOX, STORAGE } from "@/lib/constants";
 import { ORDER_STATUS_LABEL, ORDER_STOCK_STATUS_LABEL } from "@/modules/orders/domain/order-status";
-import type { sandboxPaymentView } from "@/modules/orders/infrastructure/asaas-sandbox";
+import type { CustomerAddressInput } from "@/shared/contracts/customer";
+import type { customerSandboxPayment, sandboxPaymentView } from "@/modules/orders/infrastructure/asaas-sandbox";
+import { formatZip } from "@/lib/auth";
 
-export type SandboxPaymentData = Awaited<ReturnType<typeof sandboxPaymentView>>;
+type AdminPayment = Awaited<ReturnType<typeof sandboxPaymentView>>;
+export type SandboxPaymentData = AdminPayment | ReturnType<typeof customerSandboxPayment>;
 const handleKey = STORAGE.storefrontSandboxAttempt;
 const SANDBOX_CHECKOUT_ORIGIN = new URL(ASAAS_SANDBOX.checkoutBase).origin;
 
@@ -21,20 +24,26 @@ export function AsaasSandboxCheckout({
   mode = "preview_sandbox",
   callbackOrderId = null,
   beforeCreate,
+  checkoutDetails,
+  confirmation = false,
   onPaymentChange,
   onResetNotice,
 }: {
-  mode?: "preview_sandbox" | "admin_sandbox";
+  mode?: "preview_sandbox" | "admin_sandbox" | "customer_sandbox";
   callbackOrderId?: string | null;
   beforeCreate?: () => Promise<boolean>;
+  checkoutDetails?: { contact: { name: string; email: string; phone: string }; delivery?: CustomerAddressInput };
+  confirmation?: boolean;
   onPaymentChange?: (payment: SandboxPaymentData | null) => void;
   onResetNotice?: (notice: string) => void;
 }) {
   const isAdminSandbox = mode === "admin_sandbox";
+  const isCustomerSandbox = mode === "customer_sandbox";
   const items = useCart(s => s.items);
   const consumeCart = useCart(s => s.consume);
   const customer = useAccount(s => s.customer);
-  const canAccessPayment = Boolean(customer) || isAdminSandbox;
+  const [confirmationLoginRequired, setConfirmationLoginRequired] = useState(false);
+  const canAccessPayment = Boolean(customer) || isAdminSandbox || confirmation;
   const [method, setMethod] = useState<"pix" | "card">("pix");
   const [payment, setPayment] = useState<SandboxPaymentData | null>(null);
   const [busy, setBusy] = useState(false);
@@ -75,13 +84,23 @@ export function AsaasSandboxCheckout({
     const body = await response.json().catch(() => null);
     if (signal?.aborted) return;
     if (isAdminSandbox && response.status === 401) window.dispatchEvent(new Event(sessionExpiredEvent));
+    if (confirmation && response.status === 401) {
+      setConfirmationLoginRequired(true);
+      return;
+    }
     if (response.status === 404) {
+      if (confirmation) throw new Error("Pedido indisponível nesta conta.");
       resetAttempt("Pedido anterior não encontrado nesta conta. Você pode iniciar um novo pedido.");
       return;
     }
     if (!response.ok) throw new Error(body?.error?.message ?? "Falha ao consultar pedido.");
-    setPayment(body.data);
-  }, [isAdminSandbox, resetAttempt]);
+    const data = body.data as SandboxPaymentData;
+    setPayment(data);
+    if (isCustomerSandbox && data.order.status !== "pending_payment" &&
+        readSandboxAttempt(handleKey).orderId === id) {
+      try { sessionStorage.removeItem(handleKey); } catch { /* Storage is optional. */ }
+    }
+  }, [confirmation, isAdminSandbox, isCustomerSandbox, resetAttempt]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -100,6 +119,22 @@ export function AsaasSandboxCheckout({
     });
     return () => controller.abort();
   }, [callbackOrderId, canAccessPayment, load]);
+
+  const paymentStatus = payment?.order.status;
+  useEffect(() => {
+    if (!isCustomerSandbox || !canAccessPayment || paymentStatus !== "pending_payment") return;
+    const id = orderId.current;
+    if (!id) return;
+    const controller = new AbortController();
+    const refresh = () => {
+      if (!lock.current && document.visibilityState === "visible") {
+        void load(id, controller.signal).catch(() => {});
+      }
+    };
+    const interval = window.setInterval(refresh, 5_000);
+    const timeout = window.setTimeout(() => window.clearInterval(interval), 60_000);
+    return () => { window.clearInterval(interval); window.clearTimeout(timeout); controller.abort(); };
+  }, [canAccessPayment, isCustomerSandbox, load, paymentStatus]);
 
   async function create() {
     if (lock.current) return;
@@ -127,7 +162,7 @@ export function AsaasSandboxCheckout({
             items,
             paymentMethod: method,
             idempotencyKey: key.current,
-            ...(isAdminSandbox ? { callbackPath: "/checkout" } : {}),
+            ...(isAdminSandbox ? { callbackPath: "/checkout" } : checkoutDetails),
           }),
         },
       );
@@ -141,7 +176,7 @@ export function AsaasSandboxCheckout({
       saveSandboxAttempt(handleKey, key.current, orderId.current);
       consumeCart(items);
 
-      if (isAdminSandbox && method === "card" && data.order.checkoutUrl) {
+      if ((isAdminSandbox || isCustomerSandbox) && method === "card" && data.order.checkoutUrl) {
         let parsedOrigin = "";
         try {
           parsedOrigin = new URL(data.order.checkoutUrl).origin;
@@ -193,20 +228,24 @@ export function AsaasSandboxCheckout({
 
   const showPixFallbackNotice = payment?.order.paymentMethod === "pix" &&
     payment.order.status === "pending_payment" && payment.attemptState === "ready" && !payment.pix;
+  const adminOrder = isAdminSandbox && payment && "history" in payment.order ? payment.order : null;
+  const sandboxStock = isAdminSandbox && payment && "sandboxStock" in payment ? payment.sandboxStock : null;
+  const delivery = payment?.checkoutDetails?.delivery;
+  const signInPath = confirmation && callbackOrderId ? `/pedido-confirmado?asaasOrder=${encodeURIComponent(callbackOrderId)}` : "/checkout";
 
   return (
     <section className="asaas-checkout-card" aria-label="Pagamento do pedido">
-      {!canAccessPayment ? (
+      {!canAccessPayment || confirmationLoginRequired ? (
         <div className="checkout-section checkout-guest-prompt">
           <p>Entre na sua conta ou crie um cadastro para finalizar o pedido.</p>
           <div className="checkout-guest-actions">
-            <ButtonLink href="/conta/entrar?next=/checkout">Entrar na conta</ButtonLink>
+            <ButtonLink href={`/conta/entrar?next=${encodeURIComponent(signInPath)}`}>Entrar na conta</ButtonLink>
             <ButtonLink href="/conta/cadastro?next=/checkout" variant="secondary">Criar conta</ButtonLink>
           </div>
         </div>
       ) : (
         <>
-          {!payment && !hasSavedOrder && (
+          {!confirmation && !payment && !hasSavedOrder && (
             <fieldset className="checkout-section checkout-payment-section" disabled={busy}>
               <legend>{isAdminSandbox ? "3. Pagamento (Asaas Sandbox)" : "Forma de pagamento"}</legend>
               <div className="checkout-choice-grid">
@@ -250,16 +289,16 @@ export function AsaasSandboxCheckout({
               <p>
                 {ORDER_STATUS_LABEL[payment.order.status]} · {currency(payment.order.totalCents / 100)}
               </p>
-              <p className="muted">
-                {ORDER_STOCK_STATUS_LABEL[payment.order.stockStatus ?? "none"]}
-                {isAdminSandbox && payment.sandboxStock?.length
-                  ? ` · Estoque isolado: ${payment.sandboxStock
+              {adminOrder && <p className="muted">
+                {ORDER_STOCK_STATUS_LABEL[adminOrder.stockStatus ?? "none"]}
+                {sandboxStock?.length
+                  ? ` · Estoque isolado: ${sandboxStock
                       .map((entry) => `${entry.productName}: ${entry.quantity} un.`)
                       .join(", ")}`
                   : ""}
-              </p>
+              </p>}
 
-              {payment.attemptState !== "ready" && (
+              {payment.order.status === "pending_payment" && payment.attemptState !== "ready" && (
                 <p role="status">
                   {payment.attemptState === "review"
                     ? "Pedido em análise. Aguarde a validação do atendimento."
@@ -328,7 +367,7 @@ export function AsaasSandboxCheckout({
                     <a
                       className="button button-primary"
                       href={payment.order.checkoutUrl}
-                      {...(isAdminSandbox ? {} : { target: "_blank", rel: "noreferrer" })}
+                      {...(isAdminSandbox || isCustomerSandbox ? {} : { target: "_blank", rel: "noreferrer" })}
                     >
                       Pagar com cartão{" "}
                       {isAdminSandbox ? (
@@ -353,16 +392,29 @@ export function AsaasSandboxCheckout({
                 </>
               )}
 
-              <h3>Histórico do pedido</h3>
-              <ul>
-                {payment.order.history.map(h => (
+              {isCustomerSandbox && <dl className="order-totals">
+                <div><dt>Subtotal</dt><dd>{currency(payment.order.subtotalCents / 100)}</dd></div>
+                <div><dt>Entrega de teste</dt><dd>{delivery
+                  ? `${delivery.street}, ${delivery.number}${delivery.complement ? ` · ${delivery.complement}` : ""} · ${delivery.city}/${delivery.state} · CEP ${formatZip(delivery.zip)}`
+                  : "Endereço não informado"}</dd></div>
+                {payment.order.shippingCents > 0 && <div><dt>Frete</dt><dd>{currency(payment.order.shippingCents / 100)}</dd></div>}
+                {payment.order.discountCents > 0 && <div><dt>Desconto</dt><dd>{currency(payment.order.discountCents / 100)}</dd></div>}
+                <div className="order-grand"><dt>Total</dt><dd>{currency(payment.order.totalCents / 100)}</dd></div>
+              </dl>}
+              {adminOrder && <><h3>Histórico do pedido</h3><ul>
+                {adminOrder.history.map(h => (
                   <li key={h.id}>
                     {ORDER_STATUS_LABEL[h.toStatus]} — {h.reason}
                   </li>
                 ))}
-              </ul>
+              </ul></>}
               <div className="checkout-actions-row">
-                {customer && (
+                {isCustomerSandbox && !confirmation && (
+                  <Link href={`/pedido-confirmado?asaasOrder=${encodeURIComponent(payment.order.id)}`} className="text-link">
+                    Acompanhar este pedido
+                  </Link>
+                )}
+                {(customer || confirmation) && (
                   <Link href="/conta/pedidos" className="text-link">
                     Ver em Meus pedidos
                   </Link>
@@ -372,12 +424,13 @@ export function AsaasSandboxCheckout({
                     Ver painel Asaas Sandbox
                   </Link>
                 )}
+                {isCustomerSandbox && <Link href="/loja" className="text-link">Voltar à loja</Link>}
               </div>
             </div>
           )}
 
           <div className="checkout-actions-row">
-            <Button
+            {(!confirmation || paymentStatus === "pending_payment" || !payment) && <Button
               type="button"
               variant={payment || hasSavedOrder ? "secondary" : "primary"}
               className={!payment && !hasSavedOrder ? "checkout-submit" : ""}
@@ -394,7 +447,7 @@ export function AsaasSandboxCheckout({
                   ? "Atualizar status do pedido"
                   : "Finalizar pedido"}
               {!payment && !hasSavedOrder && <ArrowRight size={18} aria-hidden="true" />}
-            </Button>
+            </Button>}
             {isAdminSandbox &&
               payment &&
               !["paid", "refunded", "canceled", "expired"].includes(payment.order.status) && (
@@ -409,12 +462,12 @@ export function AsaasSandboxCheckout({
                   Cancelar e liberar estoque
                 </Button>
               )}
-            {canStartAnother && (
+            {!confirmation && canStartAnother && (
               <Button type="button" variant="ghost" disabled={busy} onClick={() => resetAttempt("")}>
                 Fazer novo pedido
               </Button>
             )}
-            {!payment && hasSavedOrder && (
+            {!isCustomerSandbox && !confirmation && !payment && hasSavedOrder && (
               <Button type="button" variant="ghost" disabled={busy} onClick={() => resetAttempt("")}>
                 Descartar tentativa anterior
               </Button>

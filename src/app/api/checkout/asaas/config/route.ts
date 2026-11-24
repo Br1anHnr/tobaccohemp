@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sessionCookie, sessionUser } from "@/modules/auth";
+import { customerSessionCookie, customerSessionUser, sessionCookie, sessionUser } from "@/modules/auth";
+import { sandboxCustomerAllowed } from "@/modules/orders/infrastructure/asaas-customer-access";
 import { isProductionAdminSandbox, sandboxEnabled } from "@/modules/orders/infrastructure/asaas-client";
 import { ensureSchema } from "@/shared/server/migrate";
 
@@ -15,11 +16,19 @@ export async function GET(request?: NextRequest) {
     );
   }
   if (isProductionAdminSandbox()) {
-    const token = request?.cookies.get(sessionCookie)?.value;
-    if (token) {
+    const customerToken = request?.cookies.get(customerSessionCookie)?.value;
+    const adminToken = request?.cookies.get(sessionCookie)?.value;
+    if (customerToken || adminToken) {
       try {
         await ensureSchema();
-        const adminUser = await sessionUser(token);
+        const customer = customerToken ? await customerSessionUser(customerToken) : null;
+        if (customer && await sandboxCustomerAllowed(customer.id)) {
+          return NextResponse.json(
+            { data: { enabled: true, mode: "customer_sandbox" as const } },
+            { headers },
+          );
+        }
+        const adminUser = adminToken ? await sessionUser(adminToken) : null;
         if (adminUser?.role === "admin") {
           return NextResponse.json(
             { data: { enabled: true, mode: "admin_sandbox" as const } },
@@ -28,7 +37,7 @@ export async function GET(request?: NextRequest) {
         }
       } catch {
         return NextResponse.json(
-          { error: { message: "Não foi possível verificar a sessão administrativa." } },
+          { error: { message: "Não foi possível verificar a disponibilidade do checkout." } },
           { status: 503, headers },
         );
       }

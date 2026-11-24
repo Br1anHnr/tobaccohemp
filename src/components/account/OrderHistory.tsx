@@ -184,7 +184,6 @@ export function RealOrderCard({ order }: { order: CustomerOrderDetail }) {
                   {ORDER_STATUS_LABEL[entry.toStatus]} ·{" "}
                   {dateTimeFormat.format(new Date(entry.createdAt))}
                 </strong>
-                <span>{entry.reason}</span>
               </li>
             ))}
           </ul>
@@ -198,7 +197,7 @@ export function RealOrderCard({ order }: { order: CustomerOrderDetail }) {
               href={order.detailPath ?? `/checkout?asaasOrder=${encodeURIComponent(order.id)}`}
               className="text-link"
             >
-              Consultar no checkout
+              {order.detailPath?.startsWith("/pedido-confirmado") ? "Acompanhar pedido" : "Consultar no checkout"}
             </Link>
           )}
           <button

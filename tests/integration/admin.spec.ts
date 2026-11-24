@@ -45,7 +45,7 @@ test("dashboard usa sessão, cadastro, estoque e indicadores reais do Neon", asy
     await expect(page).toHaveURL(/\/admin\/produtos$/);
     const cookie = (await context.cookies()).find(item => item.name === "th_admin_session");
     expect(cookie?.httpOnly).toBe(true);
-    expect(cookie?.sameSite).toBe("Strict");
+    expect(cookie?.sameSite).toBe("Lax");
 
     // Cadastro de produto pela interface.
     await page.getByRole("button", { name: "Cadastrar produto", exact: true }).click();
@@ -66,10 +66,10 @@ test("dashboard usa sessão, cadastro, estoque e indicadores reais do Neon", asy
     await expect(row.locator(".stock-value")).toHaveText("1");
 
     // Indicadores refletem o produto cadastrado e a unidade em estoque.
-    const metrics = (await (await page.request.get("/api/admin/dashboard")).json()).data;
+    const metrics = (await (await page.request.get("/api/admin/dashboard?environment=commercial")).json()).data;
     await page.goto("/admin");
-    await expect(page.locator(".kpi-card")).toHaveCount(4);
-    await expect(page.locator(".kpi-card").filter({ hasText: "Produtos cadastrados" }).locator(".kpi-card__value")).toHaveText(String(metrics.products));
+    await expect(page.locator(".kpi-card")).toHaveCount(7);
+    await expect(page.locator(".kpi-card").filter({ hasText: "Produtos ativos" }).locator(".kpi-card__value")).toHaveText(String(metrics.products));
     await expect(page.locator(".kpi-card").filter({ hasText: "Unidades em estoque" }).locator(".kpi-card__value")).toHaveText(String(metrics.units));
     expect((await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze()).violations).toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);

@@ -37,7 +37,7 @@ import { AsaasSandboxCheckout, type SandboxPaymentData } from "./AsaasSandboxChe
 
 type CheckoutFieldKey = (typeof checkoutFields)[number]["name"] | "state";
 type AddressMode = "saved" | "edit" | "new";
-type SandboxMode = "disabled" | "preview_sandbox" | "admin_sandbox";
+type SandboxMode = "disabled" | "preview_sandbox" | "admin_sandbox" | "customer_sandbox";
 
 function defaultFieldValue(
   customer: CustomerProfile | null,
@@ -129,7 +129,7 @@ export function CheckoutForm({
         if (!res.ok || typeof body.data?.enabled !== "boolean") throw new Error();
         if (current.signal.aborted) return;
         const mode = body.data.mode;
-        setSandboxMode(body.data.enabled && (mode === "admin_sandbox" || mode === "preview_sandbox") ? mode : "disabled");
+        setSandboxMode(body.data.enabled && (mode === "admin_sandbox" || mode === "preview_sandbox" || mode === "customer_sandbox") ? mode : "disabled");
         setSandboxConfigError(false);
       } catch {
         if (current.signal.aborted) return;
@@ -146,7 +146,7 @@ export function CheckoutForm({
       controller?.abort();
       events.forEach((event) => window.removeEventListener(event, check));
     };
-  }, [callbackOrderId, initialSandboxAvailable]);
+  }, [callbackOrderId, initialSandboxAvailable, sessionPending, customer?.email]);
 
   const syncedCustomerRef = useRef<string | null>(null);
   useEffect(() => {
@@ -168,8 +168,8 @@ export function CheckoutForm({
     <Link className="text-link" href={adminLoginHref}>Acesso administrativo</Link>
   );
   const accessMessage = sandboxConfigError
-    ? "Não foi possível verificar o acesso administrativo. Entre novamente para tentar."
-    : "Entre com sua sessão administrativa para continuar.";
+    ? "Não foi possível verificar a disponibilidade do checkout."
+    : "Entre na sua conta para acompanhar o pedido.";
   const showEmpty = !items.length && !(sandboxAvailable && (hasAsaasLookup || Boolean(activeSandboxPayment)));
   if (showEmpty) {
     return (
@@ -180,7 +180,7 @@ export function CheckoutForm({
           </div>
         )}
         {hasAsaasLookup || sandboxConfigError ? (
-          <div className="checkout-test-note" role="status"><p>{accessMessage} {adminAccess}</p></div>
+          <div className="checkout-test-note" role="status"><p>{accessMessage} <Link href="/conta/pedidos">Meus pedidos</Link></p></div>
         ) : <EmptyState title="Escolha seus essenciais primeiro." />}
       </>
     );
@@ -590,7 +590,7 @@ export function CheckoutForm({
             </p>
             <p>
               <span>Entrega</span>
-              <span>A combinar</span>
+              <span>{activeSandboxPayment.checkoutDetails?.delivery ? "Endereço informado" : "A combinar"}</span>
             </p>
             <div className="summary-total">
               <span>Total</span>
@@ -622,9 +622,29 @@ export function CheckoutForm({
     </aside>
   );
 
-  // Preview Sandbox checkout (enabled only on the sandbox/asaas-preview branch or local tests).
   if (sandboxAvailable) {
+    const checkoutDetails = sandboxMode === "customer_sandbox" ? {
+      contact: { name: fieldValue("name"), email: fieldValue("email"), phone: fieldValue("phone") },
+      delivery: hasSavedAddresses || sandboxAddressOpen ? {
+        label: addressLabel || activeSavedAddress?.label || "Principal",
+        zip: fieldValue("zip"), street: fieldValue("address"), number: fieldValue("number"),
+        complement: fieldValue("complement"), city: fieldValue("city"), state: fieldValue("state"),
+      } : undefined,
+    } : undefined;
     const validateAndSaveSandboxDelivery = async (): Promise<boolean> => {
+      if (checkoutDetails) {
+        const { name, email, phone } = checkoutDetails.contact;
+        const contactErrors: Record<string, string> = {};
+        if (!name.trim()) contactErrors.name = "Preencha o nome completo.";
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) contactErrors.email = "Informe um e-mail válido.";
+        if (!isValidPhone(phone)) contactErrors.phone = "Informe um telefone com DDD.";
+        if (Object.keys(contactErrors).length) {
+          setEditingContact(true);
+          setErrors(contactErrors);
+          requestAnimationFrame(() => summary.current?.focus());
+          return false;
+        }
+      }
       const shouldValidateAddress =
         (hasSavedAddresses && addressMode !== "saved") ||
         (!hasSavedAddresses && sandboxAddressOpen);
@@ -655,7 +675,9 @@ export function CheckoutForm({
             ) : (
               <>
                 <Check size={15} aria-hidden="true" />
-                <p>Ambiente de homologação — cobranças reais estão desabilitadas neste Preview.</p>
+                <p>{sandboxMode === "preview_sandbox"
+                  ? "Ambiente de homologação — cobranças reais estão desabilitadas neste Preview."
+                  : "Pagamento de teste pelo Asaas Sandbox. Sem cobrança ou envio real."}</p>
               </>
             )}
           </div>
@@ -738,7 +760,8 @@ export function CheckoutForm({
           )}
 
           <AsaasSandboxCheckout
-            mode={sandboxMode === "admin_sandbox" ? "admin_sandbox" : "preview_sandbox"}
+            mode={sandboxMode}
+            checkoutDetails={checkoutDetails}
             callbackOrderId={callbackOrderId}
             beforeCreate={validateAndSaveSandboxDelivery}
             onPaymentChange={handleSandboxPaymentChange}

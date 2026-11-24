@@ -14,6 +14,7 @@ import type {
   OrderStatusHistoryEntry,
   OrderStockStatus,
   PaymentProviderId,
+  StockMovement,
 } from "@/shared/contracts/orders";
 import { pool, type Db } from "@/shared/server/database";
 import { AdminError, missing } from "@/shared/server/validation";
@@ -505,6 +506,7 @@ export async function createOrder(
 
     // Aggregate quantities per productId and reserve stock atomically in sorted order.
     const qtyByProduct = new Map<string, number>();
+    const stockMovements: StockMovement[] = [];
     for (const item of input.items) {
       qtyByProduct.set(
         item.productId,
@@ -528,6 +530,8 @@ export async function createOrder(
           `Estoque insuficiente para reservar "${productName}".`,
         );
       }
+      const after = Number(updated.rows[0].quantity);
+      stockMovements.push({ productId, before: after + reserveQty, after });
     }
 
     const frozenItems = resolvedEntries.map((entry) => {
@@ -644,6 +648,7 @@ export async function createOrder(
       reservedQuantities: Array.from(qtyByProduct.entries()).map(
         ([productId, quantity]) => ({ productId, quantity }),
       ),
+      stockMovements,
     });
     const intentMeta = JSON.stringify({
       provider: intent.provider,
@@ -725,6 +730,7 @@ async function applyStatusTransition(
   let stockAction: "none" | "committed" | "released" = "none";
   let releasedAt: string | null = null;
   const releasedItems: Array<{ productId: string; quantity: number }> = [];
+  const stockMovements: StockMovement[] = [];
 
   // A late, provider-confirmed payment must reacquire a released reservation.
   // The enclosing transaction rolls back every row if any item is unavailable.
@@ -732,8 +738,10 @@ async function applyStatusTransition(
     const items = await tx.query("SELECT product_id, SUM(quantity)::int AS qty FROM order_items WHERE order_id=$1 GROUP BY product_id ORDER BY product_id", [id]);
     await tx.query("SELECT product_id FROM inventory WHERE product_id=ANY($1::text[]) ORDER BY product_id FOR UPDATE", [items.rows.map(r => r.product_id)]);
     for (const item of items.rows) {
-      const result = await tx.query("UPDATE inventory SET quantity=quantity-$1, updated_at=$2 WHERE product_id=$3 AND quantity >= $1 RETURNING product_id", [item.qty, now, item.product_id]);
+      const result = await tx.query("UPDATE inventory SET quantity=quantity-$1, updated_at=$2 WHERE product_id=$3 AND quantity >= $1 RETURNING quantity", [item.qty, now, item.product_id]);
       if (!result.rows.length) throw new AdminError(409, "LATE_PAYMENT_STOCK_REVIEW", "Pagamento tardio exige revisão de estoque.");
+      const after = Number(result.rows[0].quantity);
+      stockMovements.push({ productId: item.product_id, before: after + Number(item.qty), after });
     }
     nextStockStatus = "committed";
     stockAction = "committed";
@@ -767,10 +775,13 @@ async function applyStatusTransition(
       for (const itemRow of itemsRes.rows) {
         const productId = String(itemRow.product_id);
         const qty = Number(itemRow.qty);
-        await tx.query(
-          "UPDATE inventory SET quantity = quantity + $1, updated_at = $2 WHERE product_id = $3",
+        const result = await tx.query(
+          "UPDATE inventory SET quantity = quantity + $1, updated_at = $2 WHERE product_id = $3 RETURNING quantity",
           [qty, now, productId],
         );
+        if (!result.rows.length) throw new AdminError(409, "INVENTORY_MISSING", "Estoque do pedido indisponível para devolução.");
+        const after = Number(result.rows[0].quantity);
+        stockMovements.push({ productId, before: after - qty, after });
         releasedItems.push({ productId, quantity: qty });
       }
     }
@@ -798,6 +809,7 @@ async function applyStatusTransition(
     stockAction,
     stockStatus: nextStockStatus,
     ...(releasedItems.length > 0 ? { releasedItems } : {}),
+    ...(stockMovements.length > 0 ? { stockMovements } : {}),
   });
 
   await tx.query(

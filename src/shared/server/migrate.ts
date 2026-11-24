@@ -289,6 +289,12 @@ migrations.push(
       ALTER TABLE asaas_sandbox_attempts ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMPTZ;
     `,
   },
+  {
+    id: "007_asaas_checkout_details",
+    sql: `
+      ALTER TABLE asaas_sandbox_attempts ADD COLUMN IF NOT EXISTS checkout_details JSONB;
+    `,
+  },
 );
 
 let running: Promise<void> | undefined;
@@ -342,10 +348,14 @@ async function run(db: Pool): Promise<void> {
     const client = await db.connect();
     try {
       await client.query("BEGIN");
-      await client.query(migration.sql);
-      await client.query("INSERT INTO schema_migrations (id) VALUES ($1)", [migration.id]);
+      await client.query("SELECT pg_advisory_xact_lock(hashtext('tobacco-hemp-schema'))");
+      const recorded = await client.query("SELECT 1 FROM schema_migrations WHERE id = $1", [migration.id]);
+      if (recorded.rowCount === 0) {
+        await client.query(migration.sql);
+        await client.query("INSERT INTO schema_migrations (id) VALUES ($1)", [migration.id]);
+      }
       await client.query("COMMIT");
-      appliedAny = true;
+      appliedAny ||= recorded.rowCount === 0 && migration.id !== "007_asaas_checkout_details";
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;

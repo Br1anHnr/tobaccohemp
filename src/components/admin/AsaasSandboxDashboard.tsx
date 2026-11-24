@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/Button";
 import { currency } from "@/lib/currency";
 import { ShoppingCart } from "lucide-react";
 import { KpiCard } from "./KpiCard";
+import { OrderDetailModal } from "./OrderDetailModal";
 import { ORDER_STATUS_LABEL, ORDER_STOCK_STATUS_LABEL } from "@/modules/orders/domain/order-status";
 import type { AdminRole } from "@/shared/contracts/admin";
 import type { OrderStatus, OrderStockStatus } from "@/shared/contracts/orders";
@@ -31,6 +32,7 @@ export function AsaasSandboxDashboard() {
   const [role, setRole] = useState<AdminRole | null>(null);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [detailId, setDetailId] = useState<string | null>(null);
 
   async function refresh() {
     try {
@@ -177,6 +179,7 @@ export function AsaasSandboxDashboard() {
                 )}
                 {role === "admin" && (
                   <div className="order-actions-row">
+                    <Button variant="secondary" onClick={() => setDetailId(row.id)}>Ver pedido</Button>
                     <Button variant="secondary" disabled={busyId === row.id} onClick={() => reconcile(row.id)}>
                       Reconciliar pedido
                     </Button>
@@ -207,6 +210,7 @@ export function AsaasSandboxDashboard() {
           </ul>
         </>
       )}
+      <OrderDetailModal orderId={detailId} sandbox onClose={() => setDetailId(null)} onUpdated={refresh} />
     </div>
   );
 }
